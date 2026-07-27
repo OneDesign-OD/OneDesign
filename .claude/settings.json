@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm add *)",
+      "Bash(npx tsc *)",
+      "Bash(npm ls *)",
+      "Bash(find / -iname \"chromium-cli*\" -maxdepth 6)",
+      "Bash(find / -iname \"*chromium-cli*\")",
+      "Bash(lsof -ti:3000 -sTCP:LISTEN)",
+      "Bash(xargs -r kill)",
+      "Bash(pnpm remove *)",
+      "Bash(npx --yes playwright --version)",
+      "Read(//root/.cache/**)",
+      "Bash(python3 -c \"import playwright\")",
+      "Bash(timeout 180 pnpm build)",
+      "Bash(git status *)"
+    ]
+  }
+}

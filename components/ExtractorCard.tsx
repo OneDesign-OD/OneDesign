@@ -89,7 +89,7 @@ export function ExtractorCard() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  We'll analyze the live rendered page — colors, fonts, spacing, and layout.
+                  We&apos;ll analyze the live rendered page — colors, fonts, spacing, and layout.
                 </p>
               </div>
             )}
@@ -133,7 +133,7 @@ export function ExtractorCard() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Public repos only for now. We'll scan for Tailwind config, CSS variables, and component structure.
+                  Public repos only for now. We&apos;ll scan for Tailwind config, CSS variables, and component structure.
                 </p>
               </div>
             )}

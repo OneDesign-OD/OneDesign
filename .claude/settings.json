@@ -13,7 +13,20 @@
       "Read(//root/.cache/**)",
       "Bash(python3 -c \"import playwright\")",
       "Bash(timeout 180 pnpm build)",
-      "Bash(git status *)"
+      "Bash(git status *)",
+      "Bash(git -C /home/alex/Desktop/onedesign log --oneline -5)",
+      "Bash(git -C /home/alex/Desktop/onedesign show --stat HEAD)",
+      "Bash(pnpm -v)",
+      "Bash(pnpm format *)",
+      "Bash(git -C /home/alex/Desktop/onedesign diff --stat)",
+      "Bash(git -C /home/alex/Desktop/onedesign diff .claude/settings.json)",
+      "Bash(git -C /home/alex/Desktop/onedesign diff app/page.tsx)",
+      "Bash(git checkout *)",
+      "Bash(pnpm build *)",
+      "Bash(pnpm lint *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git -C /home/alex/Desktop/onedesign status)",
+      "Bash(git add *)"
     ]
   }
 }

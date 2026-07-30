@@ -3,12 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
 const requestSchema = z.object({
-  url: z
-    .string()
-    .url()
-    .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
-      message: "URL must use http or https",
-    }),
+  url: z.url({ protocol: /^https?$/, message: "URL must use http or https" }),
   provider: z.enum(["openai", "anthropic"]),
   apiKey: z.string().min(1),
 });

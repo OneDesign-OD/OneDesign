@@ -26,7 +26,16 @@
       "Bash(pnpm lint *)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(git -C /home/alex/Desktop/onedesign status)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: scaffold BYOK design extractor project *)",
+      "Bash(git -C /home/alex/Desktop/onedesign log --oneline -3)",
+      "Bash(env)",
+      "Bash(command -v psql)",
+      "Bash(curl -sI --max-time 10 https://registry.npmjs.org/prisma)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(echo \"PNPM_EXIT:$?\")",
+      "Bash(pnpm install *)",
+      "Bash(pnpm exec *)"
     ]
   }
 }

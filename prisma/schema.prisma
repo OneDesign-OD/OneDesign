@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AnalysisStatus {
+  pending
+  loading
+  extracting
+  analyzing
+  generating
+  complete
+  failed
+}
+
+model Analysis {
+  id           String         @id @default(cuid())
+  sourceType   String
+  sourceInput  String
+  status       AnalysisStatus @default(pending)
+  errorCode    String?
+  errorMessage String?
+  screenshotUrl String?
+  rawData      Json?
+  aiOutput     Json?
+  markdown     String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}

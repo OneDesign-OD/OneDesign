@@ -1,6 +1,7 @@
 // Integration check for POST /api/analyze/url and GET /api/analysis/[id]/status.
 // Requires a dev server running (`pnpm dev`) in another terminal.
 // Usage: pnpm test:api [baseUrl]
+export {};
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 

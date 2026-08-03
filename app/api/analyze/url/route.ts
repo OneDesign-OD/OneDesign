@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { runUrlAnalysis } from "@/lib/pipeline";
 
 const requestSchema = z.object({
   url: z.url({ protocol: /^https?$/, message: "URL must use http or https" }),
@@ -26,15 +27,7 @@ export async function POST(request: Request) {
     },
   });
 
-  // Extraction pipeline isn't implemented yet (Phase 3+). Stub the result
-  // so the endpoint is testable end-to-end in the meantime.
-  await prisma.analysis.update({
-    where: { id: analysis.id },
-    data: {
-      status: "failed",
-      errorMessage: "Not yet implemented",
-    },
-  });
+  after(() => runUrlAnalysis(analysis.id, parsed.data.url));
 
   return NextResponse.json({ id: analysis.id });
 }

@@ -35,6 +35,12 @@ Copy `.env.example` to `.env` and fill in the values described there. AI
 provider API keys are **not** configured via environment variables — they
 are entered by the user in the UI and sent per-request only.
 
+Playwright needs its Chromium binary downloaded once:
+
+```bash
+npx playwright install chromium
+```
+
 ## Scripts
 
 - `pnpm dev` — start the dev server
@@ -42,6 +48,20 @@ are entered by the user in the UI and sent per-request only.
 - `pnpm lint` — run ESLint
 - `pnpm format` — format the codebase with Prettier
 - `pnpm format:check` — check formatting without writing changes
+- `pnpm db:test` — round-trip DB connectivity check (create/read/delete one row)
+- `pnpm test:api` — integration check for the analyze/status API routes against a running dev server
+
+## Headless browser
+
+Page rendering uses [Playwright](https://playwright.dev)'s bundled
+Chromium directly from the API route — launching it in-process worked
+reliably in testing, so no managed browser service (e.g. Browserless) was
+needed. If a future deployment target can't run a full Chromium binary
+in its serverless function (a known constraint on some platforms,
+including plain Vercel functions without extra configuration), that's the
+point to revisit this and either bundle a slimmer Chromium build or move
+to a managed browser service — the `loadPage()` helper in `lib/browser.ts`
+is the single place that decision would change.
 
 ## Project status
 

@@ -1,6 +1,8 @@
 import { put } from "@vercel/blob";
 import { loadPage } from "@/lib/browser";
+import { extractComputedStyles } from "@/lib/extract";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/lib/generated/prisma/client";
 
 /**
  * Runs the URL analysis pipeline for an already-created Analysis row.
@@ -41,6 +43,28 @@ export async function runUrlAnalysis(analysisId: string, url: string) {
       await prisma.analysis.update({
         where: { id: analysisId },
         data: { status: "extracting", screenshotUrl: blob.url },
+      });
+
+      const extraction = await extractComputedStyles(page, url);
+
+      if (!extraction.ok) {
+        await prisma.analysis.update({
+          where: { id: analysisId },
+          data: {
+            status: "failed",
+            errorCode: extraction.errorCode,
+            errorMessage: extraction.errorMessage,
+          },
+        });
+        return;
+      }
+
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "analyzing",
+          rawData: extraction.data as unknown as Prisma.InputJsonValue,
+        },
       });
     } catch (err) {
       console.error(`[pipeline] screenshot/upload failed for ${analysisId}:`, err);

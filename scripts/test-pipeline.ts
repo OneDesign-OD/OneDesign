@@ -1,5 +1,7 @@
-// Verifies the Phase 3 load+screenshot pipeline against 3 real URLs:
-// a simple static site, a JS-heavy site, and a nonexistent domain.
+// Verifies the load + screenshot + computed-style extraction pipeline
+// against 3 real URLs: a simple static site, a JS-heavy site, and a
+// nonexistent domain. For a look at the extracted rawData itself, see
+// `pnpm test:extract`.
 // Requires a dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN set.
 // Usage: pnpm test:pipeline [baseUrl]
 export {};
@@ -31,8 +33,11 @@ async function createAnalysis(url: string): Promise<string> {
   return id;
 }
 
-async function pollUntilTerminal(id: string, timeoutMs = 30_000): Promise<StatusResponse> {
-  const terminal = new Set(["extracting", "complete", "failed"]);
+async function pollUntilTerminal(
+  id: string,
+  timeoutMs = 30_000,
+): Promise<StatusResponse> {
+  const terminal = new Set(["analyzing", "complete", "failed"]);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
@@ -55,16 +60,16 @@ async function main() {
   console.log(`Testing against ${baseUrl}`);
 
   const staticSite = await runCase("simple static site", "https://example.com");
-  if (staticSite.status !== "extracting" || !staticSite.screenshotUrl) {
+  if (staticSite.status !== "analyzing" || !staticSite.screenshotUrl) {
     throw new Error("expected static site to succeed with a screenshotUrl");
   }
-  console.log("✓ static site loaded and screenshotted");
+  console.log("✓ static site loaded, screenshotted, and extracted");
 
   const jsSite = await runCase("JS-heavy site", "https://nextjs.org");
-  if (jsSite.status !== "extracting" || !jsSite.screenshotUrl) {
+  if (jsSite.status !== "analyzing" || !jsSite.screenshotUrl) {
     throw new Error("expected JS-heavy site to succeed with a screenshotUrl");
   }
-  console.log("✓ JS-heavy site loaded and screenshotted");
+  console.log("✓ JS-heavy site loaded, screenshotted, and extracted");
 
   const badSite = await runCase(
     "nonexistent domain",
@@ -73,7 +78,9 @@ async function main() {
   if (badSite.status !== "failed" || !badSite.errorCode) {
     throw new Error("expected nonexistent domain to fail with an errorCode");
   }
-  console.log(`✓ nonexistent domain failed as expected (errorCode: ${badSite.errorCode})`);
+  console.log(
+    `✓ nonexistent domain failed as expected (errorCode: ${badSite.errorCode})`,
+  );
 
   console.log("\nAll checks passed.");
 }

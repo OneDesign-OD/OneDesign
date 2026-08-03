@@ -12,7 +12,8 @@
     "db:test": "tsx scripts/db-test.ts",
     "test:api": "tsx scripts/test-api.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
-    "test:extract": "tsx scripts/test-extract.ts"
+    "test:extract": "tsx scripts/test-extract.ts",
+    "test:ambiguity": "tsx scripts/test-ambiguity.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

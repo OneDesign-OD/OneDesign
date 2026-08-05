@@ -27,7 +27,14 @@ export async function POST(request: Request) {
     },
   });
 
-  after(() => runUrlAnalysis(analysis.id, parsed.data.url));
+  after(() =>
+    runUrlAnalysis(
+      analysis.id,
+      parsed.data.url,
+      parsed.data.provider,
+      parsed.data.apiKey,
+    ),
+  );
 
   return NextResponse.json({ id: analysis.id });
 }

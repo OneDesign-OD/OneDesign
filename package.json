@@ -13,15 +13,19 @@
     "test:api": "tsx scripts/test-api.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
     "test:extract": "tsx scripts/test-extract.ts",
-    "test:ambiguity": "tsx scripts/test-ambiguity.ts"
+    "test:ambiguity": "tsx scripts/test-ambiguity.ts",
+    "test:interpret": "tsx scripts/test-interpret.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.27",
+    "@ai-sdk/openai": "^4.0.27",
     "@base-ui/react": "^1.6.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@vercel/blob": "^2.6.1",
+    "ai": "^7.0.48",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.26.0",

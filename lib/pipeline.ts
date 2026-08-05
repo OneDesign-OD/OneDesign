@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { loadPage } from "@/lib/browser";
-import { extractComputedStyles } from "@/lib/extract";
+import { extractComputedStyles, type RawData } from "@/lib/extract";
+import { interpretDesign, type Provider } from "@/lib/interpret";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -10,7 +11,12 @@ import { Prisma } from "@/lib/generated/prisma/client";
  * return `{ id }` immediately while this continues in the background;
  * clients observe progress by polling GET /api/analysis/[id]/status.
  */
-export async function runUrlAnalysis(analysisId: string, url: string) {
+export async function runUrlAnalysis(
+  analysisId: string,
+  url: string,
+  provider: Provider,
+  apiKey: string,
+) {
   try {
     await prisma.analysis.update({
       where: { id: analysisId },
@@ -32,6 +38,7 @@ export async function runUrlAnalysis(analysisId: string, url: string) {
     }
 
     const { browser, page } = result;
+    let rawData: RawData | undefined;
 
     try {
       const screenshot = await page.screenshot({ fullPage: true });
@@ -59,6 +66,8 @@ export async function runUrlAnalysis(analysisId: string, url: string) {
         return;
       }
 
+      rawData = extraction.data;
+
       await prisma.analysis.update({
         where: { id: analysisId },
         data: {
@@ -77,8 +86,34 @@ export async function runUrlAnalysis(analysisId: string, url: string) {
         },
       });
     } finally {
+      // Close the browser before the AI call — no need to hold Chromium open
+      // for a network round trip that doesn't touch the page.
       await browser.close();
     }
+
+    if (!rawData) return;
+
+    const interpretation = await interpretDesign(rawData, provider, apiKey);
+
+    if (!interpretation.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: interpretation.errorCode,
+          errorMessage: interpretation.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "generating",
+        aiOutput: interpretation.data as unknown as Prisma.InputJsonValue,
+      },
+    });
   } catch (err) {
     console.error(`[pipeline] unexpected failure for ${analysisId}:`, err);
     await prisma.analysis

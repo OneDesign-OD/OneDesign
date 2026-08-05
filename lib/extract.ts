@@ -80,6 +80,13 @@ export async function extractComputedStyles(
 /**
  * Executed inside the browser context by `page.evaluate()` — must be fully
  * self-contained (no references to Node-side scope other than `maxElements`).
+ *
+ * Helpers are grouped as methods on a plain object rather than named
+ * function/const declarations: esbuild's `keepNames` transform (used by
+ * `tsx`, which runs the test scripts) wraps named function bindings in a
+ * `__name()` call inserted into this function's own body, and that helper
+ * isn't available when Playwright ships just this function's source to the
+ * browser. Object-literal method shorthand isn't rewritten that way.
  */
 function sampleDom(maxElements: number): ExtractedElement[] {
   const STYLE_PROPS: StyleProp[] = [
@@ -100,51 +107,52 @@ function sampleDom(maxElements: number): ExtractedElement[] {
     "position",
   ];
 
-  function readStyles(el: Element): Record<StyleProp, string> {
-    const computed = getComputedStyle(el);
-    const styles = {} as Record<StyleProp, string>;
-    for (const prop of STYLE_PROPS) {
-      styles[prop] = computed[prop];
-    }
-    return styles;
-  }
-
-  function isVisible(el: Element): boolean {
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  }
-
-  function labelFor(el: Element, index: number, total: number, prefix?: string): string {
-    const tag = el.tagName.toLowerCase();
-    const cls = el.classList.length > 0 ? `.${el.classList[0]}` : "";
-    const base = prefix ? `${prefix} ${tag}${cls}` : `${tag}${cls}`;
-    return total > 1 ? `${base} (${index + 1} of ${total})` : base;
-  }
-
   const picked: ExtractedElement[] = [];
   const seen = new Set<Element>();
 
-  function add(el: Element, label: string) {
-    if (seen.has(el) || !isVisible(el)) return;
-    seen.add(el);
-    picked.push({ label, tag: el.tagName.toLowerCase(), styles: readStyles(el) });
-  }
+  const dom = {
+    readStyles(el: Element): Record<StyleProp, string> {
+      const computed = getComputedStyle(el);
+      const styles = {} as Record<StyleProp, string>;
+      for (const prop of STYLE_PROPS) {
+        styles[prop] = computed[prop];
+      }
+      return styles;
+    },
+    isVisible(el: Element): boolean {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    },
+    labelFor(el: Element, index: number, total: number, prefix?: string): string {
+      const tag = el.tagName.toLowerCase();
+      const cls = el.classList.length > 0 ? `.${el.classList[0]}` : "";
+      const base = prefix ? `${prefix} ${tag}${cls}` : `${tag}${cls}`;
+      return total > 1 ? `${base} (${index + 1} of ${total})` : base;
+    },
+    add(el: Element, label: string) {
+      if (seen.has(el) || !dom.isVisible(el)) return;
+      seen.add(el);
+      picked.push({ label, tag: el.tagName.toLowerCase(), styles: dom.readStyles(el) });
+    },
+  };
 
   if (!document.body) return [];
-  add(document.body, "body");
+  dom.add(document.body, "body");
 
   for (let level = 1; level <= 6; level++) {
     const headings = Array.from(document.querySelectorAll(`h${level}`))
-      .filter(isVisible)
+      .filter((el) => dom.isVisible(el))
       .slice(0, 2);
-    headings.forEach((el, i) => add(el, labelFor(el, i, headings.length)));
+    headings.forEach((el, i) => dom.add(el, dom.labelFor(el, i, headings.length)));
   }
 
   const nav = document.querySelector("nav");
-  if (nav && isVisible(nav)) {
-    add(nav, "nav");
-    const navLinks = Array.from(nav.querySelectorAll("a")).filter(isVisible).slice(0, 4);
-    navLinks.forEach((el, i) => add(el, labelFor(el, i, navLinks.length, "nav")));
+  if (nav && dom.isVisible(nav)) {
+    dom.add(nav, "nav");
+    const navLinks = Array.from(nav.querySelectorAll("a"))
+      .filter((el) => dom.isVisible(el))
+      .slice(0, 4);
+    navLinks.forEach((el, i) => dom.add(el, dom.labelFor(el, i, navLinks.length, "nav")));
   }
 
   const buttons = Array.from(
@@ -152,14 +160,14 @@ function sampleDom(maxElements: number): ExtractedElement[] {
       'button, a[role="button"], input[type="submit"], input[type="button"]',
     ),
   )
-    .filter(isVisible)
+    .filter((el) => dom.isVisible(el))
     .slice(0, 8);
-  buttons.forEach((el, i) => add(el, labelFor(el, i, buttons.length)));
+  buttons.forEach((el, i) => dom.add(el, dom.labelFor(el, i, buttons.length)));
 
   const links = Array.from(document.querySelectorAll("a"))
-    .filter((el) => isVisible(el) && !seen.has(el))
+    .filter((el) => dom.isVisible(el) && !seen.has(el))
     .slice(0, 6);
-  links.forEach((el, i) => add(el, labelFor(el, i, links.length)));
+  links.forEach((el, i) => dom.add(el, dom.labelFor(el, i, links.length)));
 
   // Card/container-like: has a visible border, a shadow, or a background
   // color distinct from its parent's. Larger elements first; skip anything
@@ -167,7 +175,7 @@ function sampleDom(maxElements: number): ExtractedElement[] {
   const cardCandidates = Array.from(
     document.querySelectorAll("div, section, article, li, aside"),
   ).filter((el) => {
-    if (!isVisible(el) || seen.has(el)) return false;
+    if (!dom.isVisible(el) || seen.has(el)) return false;
     const style = getComputedStyle(el);
     const hasBorder = style.borderWidth !== "0px" && style.borderStyle !== "none";
     const hasShadow = style.boxShadow !== "none";
@@ -193,7 +201,7 @@ function sampleDom(maxElements: number): ExtractedElement[] {
     if (cards.some((c) => c.contains(el) || el.contains(c))) continue;
     cards.push(el);
   }
-  cards.forEach((el, i) => add(el, labelFor(el, i, cards.length, "card")));
+  cards.forEach((el, i) => dom.add(el, dom.labelFor(el, i, cards.length, "card")));
 
   return picked.slice(0, maxElements);
 }

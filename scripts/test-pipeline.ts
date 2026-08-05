@@ -1,6 +1,10 @@
-// Verifies the load + screenshot + computed-style extraction pipeline
-// against 3 real URLs: a simple static site, a JS-heavy site, and a
-// nonexistent domain. For a look at the extracted rawData itself, see
+// Verifies the full load -> screenshot -> extract -> interpret chain against
+// 3 real URLs: a simple static site, a JS-heavy site, and a nonexistent
+// domain. Uses a deliberately fake API key, so a healthy pipeline run is
+// expected to fail at the AI step with errorCode "invalid_api_key" — that
+// proves load/screenshot/extraction succeeded and only the (intentionally
+// fake) key was rejected. For a real end-to-end run with a working key, see
+// `pnpm test:interpret`. For a look at the extracted rawData itself, see
 // `pnpm test:extract`.
 // Requires a dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN set.
 // Usage: pnpm test:pipeline [baseUrl]
@@ -35,9 +39,9 @@ async function createAnalysis(url: string): Promise<string> {
 
 async function pollUntilTerminal(
   id: string,
-  timeoutMs = 30_000,
+  timeoutMs = 45_000,
 ): Promise<StatusResponse> {
-  const terminal = new Set(["analyzing", "complete", "failed"]);
+  const terminal = new Set(["complete", "failed"]);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
@@ -60,16 +64,32 @@ async function main() {
   console.log(`Testing against ${baseUrl}`);
 
   const staticSite = await runCase("simple static site", "https://example.com");
-  if (staticSite.status !== "analyzing" || !staticSite.screenshotUrl) {
-    throw new Error("expected static site to succeed with a screenshotUrl");
+  if (
+    staticSite.status !== "failed" ||
+    staticSite.errorCode !== "invalid_api_key" ||
+    !staticSite.screenshotUrl
+  ) {
+    throw new Error(
+      "expected static site to load/screenshot/extract successfully and fail only at the AI step with errorCode invalid_api_key",
+    );
   }
-  console.log("✓ static site loaded, screenshotted, and extracted");
+  console.log(
+    "✓ static site loaded, screenshotted, extracted, and correctly rejected the fake key",
+  );
 
   const jsSite = await runCase("JS-heavy site", "https://nextjs.org");
-  if (jsSite.status !== "analyzing" || !jsSite.screenshotUrl) {
-    throw new Error("expected JS-heavy site to succeed with a screenshotUrl");
+  if (
+    jsSite.status !== "failed" ||
+    jsSite.errorCode !== "invalid_api_key" ||
+    !jsSite.screenshotUrl
+  ) {
+    throw new Error(
+      "expected JS-heavy site to load/screenshot/extract successfully and fail only at the AI step with errorCode invalid_api_key",
+    );
   }
-  console.log("✓ JS-heavy site loaded, screenshotted, and extracted");
+  console.log(
+    "✓ JS-heavy site loaded, screenshotted, extracted, and correctly rejected the fake key",
+  );
 
   const badSite = await runCase(
     "nonexistent domain",

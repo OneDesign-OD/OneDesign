@@ -4,7 +4,23 @@ import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { AlertCircle, ArrowLeft, Check, RotateCcw, SearchX, WifiOff } from "lucide-react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  Copy,
+  Download,
+  FileText,
+  LayoutGrid,
+  Palette,
+  RotateCcw,
+  Ruler,
+  SearchX,
+  Type,
+  WifiOff,
+} from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import Lightfall from "@/components/ui/Lightfall/Lightfall";
@@ -182,7 +198,7 @@ function AnalyzingPageContent() {
         />
       </div>
 
-      <main className="relative mx-auto max-w-4xl px-6 pt-40 pb-28">
+      <main className="relative mx-auto max-w-5xl px-6 pt-40 pb-28">
         {notFound ? (
           <NotFoundState />
         ) : !data ? (
@@ -380,27 +396,163 @@ function ScreenshotPreview({ url }: { url: string | null }) {
   );
 }
 
+const SECTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  Colors: Palette,
+  Typography: Type,
+  Spacing: Ruler,
+  "Layout Patterns": LayoutGrid,
+};
+
+const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$|^rgba?\(/i;
+
+const markdownComponents: Components = {
+  // The page already renders its own title — a literal "DESIGN.md" H1
+  // inside the doc would just duplicate it.
+  h1: () => null,
+  h2: ({ children }) => {
+    const text = String(children);
+    const Icon = SECTION_ICONS[text] ?? FileText;
+    return (
+      <div className="mt-10 mb-4 flex items-center gap-2 border-b border-border pb-3 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground first:mt-0">
+        <Icon className="h-3.5 w-3.5" />
+        {children}
+      </div>
+    );
+  },
+  p: ({ children }) => (
+    <p className="text-base leading-relaxed text-muted-foreground">{children}</p>
+  ),
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-foreground underline underline-offset-4 hover:text-primary"
+    >
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full border-collapse text-left text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-background/60">{children}</thead>,
+  th: ({ children }) => (
+    <th className="border-b border-border px-4 py-2.5 font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border-b border-border/60 px-4 py-3 align-top text-foreground/90 last:text-muted-foreground">
+      {children}
+    </td>
+  ),
+  code: ({ children }) => {
+    const text = String(children).trim();
+    const isColor = COLOR_PATTERN.test(text);
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5 font-mono text-xs text-foreground/90">
+        {isColor && (
+          <span
+            aria-hidden
+            className="h-3 w-3 rounded-full border border-border-strong"
+            style={{ backgroundColor: text }}
+          />
+        )}
+        {children}
+      </span>
+    );
+  },
+};
+
 function CompleteState({ data }: { data: StatusResponse }) {
+  const markdown = data.markdown ?? "";
+
   return (
     <div className="animate-fade-in-up">
-      <div className="mb-10 flex flex-col items-center text-center">
-        <div className="grid h-14 w-14 place-items-center rounded-full border border-primary/30 bg-primary/10 text-primary">
-          <Check className="h-6 w-6" />
-        </div>
-        <p className="mt-4 text-muted-foreground">Your DESIGN.md is ready below.</p>
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <CopyButton text={markdown} />
+        <DownloadButton text={markdown} />
         <Link
           href="/"
-          className="mt-6 inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+          className="ml-auto inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Analyze another page
         </Link>
       </div>
 
-      <div className="surface-card max-h-[32rem] overflow-auto p-6 font-mono text-sm whitespace-pre-wrap text-foreground/90">
-        {data.markdown}
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
+        <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)]">
+          <div className="flex items-center gap-3 border-b border-border bg-background/40 px-5 py-3">
+            <div className="flex gap-2">
+              <span className="h-3 w-3 rounded-full bg-muted-foreground/25" />
+              <span className="h-3 w-3 rounded-full bg-muted-foreground/25" />
+              <span className="h-3 w-3 rounded-full bg-muted-foreground/25" />
+            </div>
+            <div className="rounded-md border border-border bg-surface-elevated px-3 py-1.5 font-mono text-sm text-foreground/80">
+              DESIGN.md
+            </div>
+          </div>
+          {markdown ? (
+            <div className="max-h-168 overflow-auto p-8">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {markdown}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div className="p-8 text-sm text-muted-foreground">
+              No markdown was returned for this analysis.
+            </div>
+          )}
+        </div>
+
+        <ScreenshotPreview url={data.screenshotUrl} />
       </div>
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      disabled={!text}
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      }}
+      className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/5 disabled:pointer-events-none disabled:opacity-50"
+    >
+      {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+      {copied ? "Copied" : "Copy Markdown"}
+    </button>
+  );
+}
+
+function DownloadButton({ text }: { text: string }) {
+  return (
+    <button
+      type="button"
+      disabled={!text}
+      onClick={() => {
+        const blob = new Blob([text], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "DESIGN.md";
+        link.click();
+        URL.revokeObjectURL(url);
+      }}
+      className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
+    >
+      <Download className="h-4 w-4" />
+      Download DESIGN.md
+    </button>
   );
 }
 

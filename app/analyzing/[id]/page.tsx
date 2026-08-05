@@ -198,14 +198,12 @@ function AnalyzingPageContent() {
         />
       </div>
 
-      <main className="relative mx-auto max-w-5xl px-6 pt-40 pb-28">
+      <main className="relative mx-auto max-w-5xl px-6 pt-32 pb-28">
         {notFound ? (
           <NotFoundState />
-        ) : !data ? (
-          <InitialLoadingState displayUrl={displayUrl} />
         ) : (
           <>
-            <PageHeader displayUrl={displayUrl} status={data.status} />
+            <PageHeader displayUrl={displayUrl} status={data?.status ?? "pending"} />
 
             {connectionLost && (
               <div className="animate-fade-in-up mb-8 flex items-center gap-2.5 rounded-lg border border-border-strong bg-background/60 px-4 py-3 text-sm text-muted-foreground">
@@ -214,16 +212,19 @@ function AnalyzingPageContent() {
               </div>
             )}
 
-            {data.status === "complete" ? (
+            {data?.status === "complete" ? (
               <CompleteState data={data} />
             ) : (
               <div className="grid gap-10 lg:grid-cols-[1fr_320px]">
-                <StageList status={data.status} errorCode={data.errorCode} />
-                <ScreenshotPreview url={data.screenshotUrl} />
+                <StageList
+                  status={data?.status ?? "pending"}
+                  errorCode={data?.errorCode ?? null}
+                />
+                <ScreenshotPreview url={data?.screenshotUrl ?? null} />
               </div>
             )}
 
-            {data.status === "failed" && (
+            {data?.status === "failed" && (
               <FailedState errorCode={data.errorCode} errorMessage={data.errorMessage} />
             )}
           </>
@@ -254,25 +255,6 @@ function PageHeader({
       <h1 className="mt-3 truncate text-3xl font-medium tracking-tight text-foreground sm:text-4xl">
         {displayUrl ?? "Your page"}
       </h1>
-    </div>
-  );
-}
-
-function InitialLoadingState({ displayUrl }: { displayUrl: string | null }) {
-  return (
-    <div className="animate-fade-in-up">
-      <PageHeader displayUrl={displayUrl} status="pending" />
-      <div className="space-y-10">
-        {STAGES.map((stage, i) => (
-          <StageRow
-            key={stage.key}
-            label={stage.label}
-            description={stage.description}
-            state={i === 0 ? "active" : "pending"}
-            isLast={i === STAGES.length - 1}
-          />
-        ))}
-      </div>
     </div>
   );
 }
@@ -471,12 +453,14 @@ function CompleteState({ data }: { data: StatusResponse }) {
 
   return (
     <div className="animate-fade-in-up">
-      <div className="mb-8 flex flex-wrap items-center gap-3">
-        <CopyButton text={markdown} />
-        <DownloadButton text={markdown} />
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <CopyButton text={markdown} />
+          <DownloadButton text={markdown} />
+        </div>
         <Link
           href="/"
-          className="ml-auto inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground sm:ml-auto"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Analyze another page
@@ -526,7 +510,7 @@ function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1800);
       }}
-      className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/5 disabled:pointer-events-none disabled:opacity-50"
+      className="inline-flex items-center justify-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/5 disabled:pointer-events-none disabled:opacity-50"
     >
       {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
       {copied ? "Copied" : "Copy Markdown"}
@@ -548,7 +532,7 @@ function DownloadButton({ text }: { text: string }) {
         link.click();
         URL.revokeObjectURL(url);
       }}
-      className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
+      className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
     >
       <Download className="h-4 w-4" />
       Download DESIGN.md

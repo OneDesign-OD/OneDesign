@@ -18,7 +18,11 @@ import { FiGithub } from "react-icons/fi";
 
 type Tab = "url" | "screenshot" | "repo";
 
-const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const TABS: {
+  id: Tab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
   { id: "url", label: "URL", icon: LinkIcon },
   { id: "screenshot", label: "Screenshot", icon: ImagePlus },
   { id: "repo", label: "GitHub Repo", icon: FiGithub },
@@ -63,7 +67,9 @@ export function ExtractorCard() {
     setError(null);
 
     if (tab !== "url") {
-      setError("Screenshot and GitHub Repo analysis aren't available yet — try the URL tab.");
+      setError(
+        "Screenshot and GitHub Repo analysis aren't available yet — try the URL tab.",
+      );
       return;
     }
     if (!isValidHttpUrl(url)) {
@@ -96,7 +102,7 @@ export function ExtractorCard() {
       }
 
       const { id } = (await res.json()) as { id: string };
-      router.push(`/analyzing/${id}`);
+      router.push(`/analyzing/${id}?url=${encodeURIComponent(url)}`);
     } catch {
       setError("Couldn't reach the server. Check your connection and try again.");
       setIsSubmitting(false);
@@ -134,7 +140,9 @@ export function ExtractorCard() {
                   onClick={() => setTab(t.id)}
                   disabled={isSubmitting}
                   className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                    active
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   <Icon className="h-5 w-5" />
@@ -161,7 +169,8 @@ export function ExtractorCard() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  We&apos;ll analyze the live rendered page — colors, fonts, spacing, and layout.
+                  We&apos;ll analyze the live rendered page — colors, fonts, spacing, and
+                  layout.
                 </p>
               </div>
             )}
@@ -184,8 +193,13 @@ export function ExtractorCard() {
                       : "border-border-strong bg-background hover:border-muted-foreground/40"
                   }`}
                 >
-                  <ImagePlus className="h-14 w-14 text-muted-foreground" strokeWidth={1.5} />
-                  <p className="mt-4 text-base font-medium text-foreground">Drop a screenshot here</p>
+                  <ImagePlus
+                    className="h-14 w-14 text-muted-foreground"
+                    strokeWidth={1.5}
+                  />
+                  <p className="mt-4 text-base font-medium text-foreground">
+                    Drop a screenshot here
+                  </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     or click to browse — PNG, JPG up to 10MB
                   </p>
@@ -205,7 +219,8 @@ export function ExtractorCard() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Public repos only for now. We&apos;ll scan for Tailwind config, CSS variables, and component structure.
+                  Public repos only for now. We&apos;ll scan for Tailwind config, CSS
+                  variables, and component structure.
                 </p>
               </div>
             )}
@@ -248,9 +263,13 @@ export function ExtractorCard() {
             <div className="mt-4 flex items-start justify-between gap-4">
               <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Lock className="h-3.5 w-3.5" />
-                Your key is never stored or sent to our servers. Used only for this request.
+                Your key is never stored or sent to our servers. Used only for this
+                request.
               </p>
-              <a href="#" className="shrink-0 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              <a
+                href="#"
+                className="shrink-0 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
                 Where do I get an API key?
               </a>
             </div>

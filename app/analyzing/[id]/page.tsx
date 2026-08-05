@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -12,8 +12,11 @@ import {
   Check,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   FileText,
   LayoutGrid,
+  Loader2,
   Palette,
   RotateCcw,
   Ruler,
@@ -123,17 +126,21 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export default function AnalyzingPage() {
+  const params = useParams<{ id: string }>();
   return (
     <Suspense fallback={null}>
-      <AnalyzingPageContent />
+      {/* Keying on `id` remounts this on retry (which swaps to a new id),
+          giving every analysis a clean state slate instead of manually
+          resetting state for the previous one inside an effect. */}
+      <AnalyzingPageContent key={params.id} id={params.id} />
     </Suspense>
   );
 }
 
-function AnalyzingPageContent() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
-  const displayUrl = useSearchParams().get("url");
+function AnalyzingPageContent({ id }: { id: string }) {
+  const searchParams = useSearchParams();
+  const displayUrl = searchParams.get("url");
+  const displayProvider = searchParams.get("provider");
 
   const [data, setData] = useState<StatusResponse | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -225,7 +232,12 @@ function AnalyzingPageContent() {
             )}
 
             {data?.status === "failed" && (
-              <FailedState errorCode={data.errorCode} errorMessage={data.errorMessage} />
+              <FailedState
+                errorCode={data.errorCode}
+                errorMessage={data.errorMessage}
+                url={displayUrl}
+                defaultProvider={displayProvider}
+              />
             )}
           </>
         )}
@@ -543,17 +555,66 @@ function DownloadButton({ text }: { text: string }) {
 function FailedState({
   errorCode,
   errorMessage,
+  url,
+  defaultProvider,
 }: {
   errorCode: string | null;
   errorMessage: string | null;
+  url: string | null;
+  defaultProvider: string | null;
 }) {
+  const router = useRouter();
+  const [provider, setProvider] = useState(
+    defaultProvider === "openai" ? "openai" : "anthropic",
+  );
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
   const message =
     (errorCode && ERROR_MESSAGES[errorCode]) ??
     errorMessage ??
     "Something unexpected happened. Please try again.";
 
+  async function handleRetry() {
+    setRetryError(null);
+
+    if (!url) {
+      setRetryError("We lost track of the original URL — please start a new analysis.");
+      return;
+    }
+    if (!apiKey.trim()) {
+      setRetryError("Enter your API key to retry.");
+      return;
+    }
+
+    setIsRetrying(true);
+    try {
+      const res = await fetch("/api/analyze/url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, provider, apiKey }),
+      });
+
+      if (!res.ok) {
+        setRetryError("Couldn't start a new analysis. Please try again.");
+        setIsRetrying(false);
+        return;
+      }
+
+      const { id } = (await res.json()) as { id: string };
+      router.replace(
+        `/analyzing/${id}?url=${encodeURIComponent(url)}&provider=${provider}`,
+      );
+    } catch {
+      setRetryError("Couldn't reach the server. Check your connection and try again.");
+      setIsRetrying(false);
+    }
+  }
+
   return (
-    <div className="animate-fade-in-up mt-10 flex flex-col items-start gap-4 rounded-xl border border-destructive/30 bg-destructive/10 p-6 sm:flex-row sm:items-center sm:justify-between">
+    <div className="animate-fade-in-up mt-10 rounded-xl border border-destructive/30 bg-destructive/10 p-6">
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
         <div>
@@ -561,13 +622,62 @@ function FailedState({
           <p className="mt-1 text-sm text-muted-foreground">{message}</p>
         </div>
       </div>
-      <Link
-        href="/"
-        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:brightness-110"
-      >
-        <RotateCcw className="h-4 w-4" />
-        Try again
-      </Link>
+
+      <div className="mt-5 border-t border-destructive/20 pt-5">
+        <div className="grid gap-3 sm:grid-cols-[160px_1fr_auto]">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            disabled={isRetrying}
+            className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+          >
+            <option value="anthropic">◆ Anthropic</option>
+            <option value="openai">◇ OpenAI</option>
+          </select>
+          <div className="relative">
+            <input
+              type={showKey ? "text" : "password"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              disabled={isRetrying}
+              placeholder="sk-..."
+              className="w-full rounded-md border border-border bg-background py-2.5 pl-3 pr-10 font-mono text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((v) => !v)}
+              aria-label={showKey ? "Hide key" : "Show key"}
+              className="absolute top-1/2 right-1.5 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {showKey ? (
+                <EyeOff className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={handleRetry}
+            disabled={isRetrying}
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-60"
+          >
+            {isRetrying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
+            {isRetrying ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+
+        {retryError && <p className="mt-2 text-sm text-destructive">{retryError}</p>}
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          Re-enter your key to retry — it&apos;s never stored, so we can&apos;t reuse it
+          automatically.
+        </p>
+      </div>
     </div>
   );
 }

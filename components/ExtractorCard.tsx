@@ -102,7 +102,7 @@ export function ExtractorCard() {
       }
 
       const { id } = (await res.json()) as { id: string };
-      router.push(`/analyzing/${id}?url=${encodeURIComponent(url)}`);
+      router.push(`/analyzing/${id}?url=${encodeURIComponent(url)}&provider=${provider}`);
     } catch {
       setError("Couldn't reach the server. Check your connection and try again.");
       setIsSubmitting(false);

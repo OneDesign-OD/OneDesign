@@ -1,19 +1,20 @@
-'use client'
+"use client";
 
 import { useState } from "react";
 import {
+  AlertCircle,
   Eye,
   EyeOff,
-    Globe,
+  Globe,
   ImagePlus,
   Info,
   Link as LinkIcon,
+  Loader2,
   Lock,
   Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FiGithub } from "react-icons/fi";
-
 
 type Tab = "url" | "screenshot" | "repo";
 
@@ -23,17 +24,84 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: "repo", label: "GitHub Repo", icon: FiGithub },
 ];
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function firstFieldError(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const issues = (body as { issues?: { fieldErrors?: Record<string, unknown> } }).issues;
+  const fieldErrors = issues?.fieldErrors;
+  if (!fieldErrors) return undefined;
+  for (const value of Object.values(fieldErrors)) {
+    if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  }
+  return undefined;
+}
+
 export function ExtractorCard() {
   const [tab, setTab] = useState<Tab>("url");
+  const [url, setUrl] = useState("");
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const canEstimate = apiKey.length > 4;
   const activeIndex = TABS.findIndex((t) => t.id === tab);
 
-  const router = useRouter()
+  const router = useRouter();
+
+  async function handleAnalyze() {
+    setError(null);
+
+    if (tab !== "url") {
+      setError("Screenshot and GitHub Repo analysis aren't available yet — try the URL tab.");
+      return;
+    }
+    if (!isValidHttpUrl(url)) {
+      setError("Enter a valid URL, including https://.");
+      return;
+    }
+    if (!apiKey.trim()) {
+      setError("Enter your API key.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/analyze/url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, provider, apiKey }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const message =
+          firstFieldError(body) ??
+          (body && typeof body === "object" && "error" in body
+            ? String((body as { error: unknown }).error)
+            : undefined);
+        setError(message ?? "Something went wrong. Please try again.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { id } = (await res.json()) as { id: string };
+      router.push(`/analyzing/${id}`);
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <div id="start" className="relative mx-auto w-full max-w-205">
@@ -64,7 +132,8 @@ export function ExtractorCard() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-base font-medium transition-colors ${
+                  disabled={isSubmitting}
+                  className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                     active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -84,8 +153,11 @@ export function ExtractorCard() {
                   <Globe className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                   <input
                     type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    disabled={isSubmitting}
                     placeholder="https://example.com"
-                    className="w-full rounded-md border border-border bg-background py-3.5 pl-12 pr-5 text-base text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary focus:outline-none"
+                    className="w-full rounded-md border border-border bg-background py-3.5 pl-12 pr-5 text-base text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary focus:outline-none disabled:opacity-60"
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -148,7 +220,8 @@ export function ExtractorCard() {
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                className="rounded-md border border-border bg-background px-4 py-3 text-base text-foreground focus:border-primary focus:outline-none"
+                disabled={isSubmitting}
+                className="rounded-md border border-border bg-background px-4 py-3 text-base text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
               >
                 <option value="anthropic">◆ Anthropic</option>
                 <option value="openai">◇ OpenAI</option>
@@ -158,8 +231,9 @@ export function ExtractorCard() {
                   type={showKey ? "text" : "password"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
+                  disabled={isSubmitting}
                   placeholder="sk-..."
-                  className="w-full rounded-md border border-border bg-background py-3 pl-4 pr-11 font-mono text-base text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
+                  className="w-full rounded-md border border-border bg-background py-3 pl-4 pr-11 font-mono text-base text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none disabled:opacity-60"
                 />
                 <button
                   type="button"
@@ -182,15 +256,35 @@ export function ExtractorCard() {
             </div>
           </div>
 
+          {error && (
+            <div
+              role="alert"
+              className="animate-fade-in-up flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
+
           <button
-            onClick={() => router.push("/analyzing")}
-            className="group flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-4 text-base font-medium text-primary-foreground transition-all hover:brightness-110 hover:-translate-y-0.5 hover:shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-primary-glow)_70%,transparent)]"
+            onClick={handleAnalyze}
+            disabled={isSubmitting}
+            className="group flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-4 text-base font-medium text-primary-foreground transition-all hover:brightness-110 hover:-translate-y-0.5 hover:shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-primary-glow)_70%,transparent)] disabled:pointer-events-none disabled:opacity-70 disabled:hover:translate-y-0"
           >
-            <Sparkles className="h-5 w-5" />
-            Analyze Design
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-5 w-5" />
+                Analyze Design
+              </>
+            )}
           </button>
 
-          {canEstimate && (
+          {canEstimate && !isSubmitting && (
             <div className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
               <span>Estimated cost:</span>
               <span className="font-mono text-foreground/80">~$0.02–0.05</span>

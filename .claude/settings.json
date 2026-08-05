@@ -35,7 +35,24 @@
       "Bash(echo \"exit:$?\")",
       "Bash(echo \"PNPM_EXIT:$?\")",
       "Bash(pnpm install *)",
-      "Bash(pnpm exec *)"
+      "Bash(pnpm exec *)",
+      "Bash(pnpm test:ambiguity http://localhost:3001)",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\" -X POST http://localhost:3001/api/analyze/url -H \"Content-Type: application/json\" -d '{\"url\":\"https://nextjs.org\",\"provider\":\"anthropic\",\"apiKey\":\"test-key-not-a-real-secret\"}')",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(node -e ' *)",
+      "Bash(pnpm test:extract https://nextjs.org)",
+      "Bash(pnpm test:ambiguity https://nextjs.org)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3001/)",
+      "Bash(pnpm test:interpret anthropic test-key-not-a-real-secret https://nextjs.org)",
+      "Bash(curl -s -o /dev/null -w \"root: %{http_code}\\\\n\" http://localhost:3001/)",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\" -X POST http://localhost:3001/api/analyze/url -H \"Content-Type: application/json\" -d '{\"url\":\"https://example.com\",\"provider\":\"anthropic\",\"apiKey\":\"test-key-not-a-real-secret\"}')",
+      "Bash(echo \"PID: $!\")",
+      "Bash(lsof -ti:3001)",
+      "Bash(fuser 3001/tcp)",
+      "Bash(curl -s -o /dev/null -w \"http_code:%{http_code}\\\\n\" http://localhost:3001/)",
+      "Bash(kill 76916 76917 76936 76964 76975)",
+      "Bash(curl -s -o /dev/null -w \"http_code:%{http_code}\\\\n\" --max-time 2 http://localhost:3001/)"
     ]
   }
 }

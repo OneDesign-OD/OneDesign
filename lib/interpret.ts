@@ -1,4 +1,4 @@
-import { generateObject, APICallError, NoObjectGeneratedError } from "ai";
+import { generateObject, APICallError, NoObjectGeneratedError, RetryError } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
@@ -102,32 +102,52 @@ export async function interpretDesign(
       };
     }
 
-    if (APICallError.isInstance(err)) {
-      if (err.statusCode === 401 || err.statusCode === 403) {
-        return {
-          ok: false,
-          errorCode: "invalid_api_key",
-          errorMessage: "The provided API key was rejected by the provider.",
-        };
-      }
-      if (err.statusCode === 429) {
-        return {
-          ok: false,
-          errorCode: "rate_limited",
-          errorMessage: "The provider rate-limited this request.",
-        };
-      }
-      return {
-        ok: false,
-        errorCode: "ai_provider_error",
-        errorMessage: `The AI provider returned an error${err.statusCode ? ` (${err.statusCode})` : ""}.`,
-      };
+    // The AI SDK retries retryable failures (network errors, 5xx, 429)
+    // internally and wraps the exhausted attempts in a RetryError — the
+    // classifiable error is on `.lastError`, not `err` itself.
+    if (RetryError.isInstance(err) && APICallError.isInstance(err.lastError)) {
+      return classifyApiCallError(err.lastError);
     }
 
+    if (APICallError.isInstance(err)) {
+      return classifyApiCallError(err);
+    }
+
+    console.error("[interpret] unclassified error:", err);
     return {
       ok: false,
       errorCode: "ai_provider_error",
       errorMessage: "Something went wrong while interpreting the extracted styles.",
     };
   }
+}
+
+function classifyApiCallError(err: APICallError): InterpretResult {
+  if (err.statusCode === 401 || err.statusCode === 403) {
+    return {
+      ok: false,
+      errorCode: "invalid_api_key",
+      errorMessage: "The provided API key was rejected by the provider.",
+    };
+  }
+  if (err.statusCode === 429) {
+    return {
+      ok: false,
+      errorCode: "rate_limited",
+      errorMessage: "The provider rate-limited this request.",
+    };
+  }
+  if (err.statusCode === undefined) {
+    return {
+      ok: false,
+      errorCode: "ai_provider_error",
+      errorMessage:
+        "Could not connect to the AI provider. Check your network connection and try again.",
+    };
+  }
+  return {
+    ok: false,
+    errorCode: "ai_provider_error",
+    errorMessage: `The AI provider returned an error (${err.statusCode}).`,
+  };
 }

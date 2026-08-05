@@ -2,6 +2,7 @@ import { put } from "@vercel/blob";
 import { loadPage } from "@/lib/browser";
 import { extractComputedStyles, type RawData } from "@/lib/extract";
 import { interpretDesign, type Provider } from "@/lib/interpret";
+import { generateMarkdown } from "@/lib/markdown";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -112,6 +113,28 @@ export async function runUrlAnalysis(
       data: {
         status: "generating",
         aiOutput: interpretation.data as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const formatted = generateMarkdown(url, interpretation.data);
+
+    if (!formatted.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: formatted.errorCode,
+          errorMessage: formatted.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "complete",
+        markdown: formatted.markdown,
       },
     });
   } catch (err) {

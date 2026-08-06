@@ -138,6 +138,7 @@ function classifyApiCallError(err: APICallError): InterpretResult {
     };
   }
   if (err.statusCode === undefined) {
+    console.error("[interpret] could not connect to provider:", err.message, err.cause);
     return {
       ok: false,
       errorCode: "ai_provider_error",
@@ -145,6 +146,11 @@ function classifyApiCallError(err: APICallError): InterpretResult {
         "Could not connect to the AI provider. Check your network connection and try again.",
     };
   }
+
+  console.error(
+    `[interpret] provider returned ${err.statusCode}:`,
+    err.responseBody ?? err.message,
+  );
   return {
     ok: false,
     errorCode: "ai_provider_error",

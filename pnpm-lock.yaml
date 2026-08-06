@@ -11,6 +11,9 @@ importers:
       '@ai-sdk/anthropic':
         specifier: ^4.0.27
         version: 4.0.27(zod@4.4.3)
+      '@ai-sdk/google':
+        specifier: ^4.0.34
+        version: 4.0.34(zod@4.4.3)
       '@ai-sdk/openai':
         specifier: ^4.0.27
         version: 4.0.27(zod@4.4.3)
@@ -153,6 +156,12 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/google@4.0.34':
+    resolution: {integrity: sha512-kREgkTjLfB9VfTuPNMnfrcvYbiHfTkMHt6+11kVqe3j2BXFTSsL7nwG3t4L97UOD4EiYVvYuS2KlIDlW3LzTnA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/openai@4.0.27':
     resolution: {integrity: sha512-6MsWnbNG0ZjZgzYimNNjnTAlOFXn+jdLMFB47dDVUsRNjxdUoTSduCQPZZeTKoUl0ZNwCjsJ31of49l/t1r9MA==}
     engines: {node: '>=22'}
@@ -165,8 +174,18 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/provider-utils@5.0.21':
+    resolution: {integrity: sha512-Q4z27c5vqKuXZN65QuF7FVm+uvm3qxEioiQ+8c3s5xXlhbE1Y/SLGBB4BuF+UWia4KaDu2HmNpdR1RGW02/eGg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider@4.0.4':
     resolution: {integrity: sha512-tbHKNLirllUNF3ZlkCsXnwab2ZV1Sl4b1H/Cp9ruCce15IBmskE8Gwkk0yo9xDWY+jho2of7lVXtwSsyrq7cwQ==}
+    engines: {node: '>=22'}
+
+  '@ai-sdk/provider@4.0.5':
+    resolution: {integrity: sha512-9WAerTaPU2jcVi8dh8x27tySEuLur1Kfg7Go74GuCmsC/2MDSvrTkrK8ZrXWjryEevKfcPPmO1enveE7eqlzoA==}
     engines: {node: '>=22'}
 
   '@alloc/quick-lru@5.2.0':
@@ -4425,6 +4444,12 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
+  '@ai-sdk/google@4.0.34(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.5
+      '@ai-sdk/provider-utils': 5.0.21(zod@4.4.3)
+      zod: 4.4.3
+
   '@ai-sdk/openai@4.0.27(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.4
@@ -4440,7 +4465,20 @@ snapshots:
       undici: 7.29.0
       zod: 4.4.3
 
+  '@ai-sdk/provider-utils@5.0.21(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.5
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.0
+      undici: 7.29.0
+      zod: 4.4.3
+
   '@ai-sdk/provider@4.0.4':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@4.0.5':
     dependencies:
       json-schema: 0.4.0
 

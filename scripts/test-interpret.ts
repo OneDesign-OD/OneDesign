@@ -3,7 +3,7 @@
 // database required. The key is used only for this one call, never logged
 // or written anywhere; run this yourself with your own key rather than
 // pasting it into a shared conversation.
-// Usage: pnpm test:interpret <openai|anthropic> <apiKey> [url]
+// Usage: pnpm test:interpret <openai|anthropic|google> <apiKey> [url]
 import { loadPage } from "@/lib/browser";
 import { extractComputedStyles } from "@/lib/extract";
 import { interpretDesign, type Provider } from "@/lib/interpret";
@@ -14,8 +14,15 @@ function assert(condition: unknown, message: string): asserts condition {
 
 async function main() {
   const [, , providerArg, apiKey, urlArg] = process.argv;
-  if ((providerArg !== "openai" && providerArg !== "anthropic") || !apiKey) {
-    throw new Error("Usage: pnpm test:interpret <openai|anthropic> <apiKey> [url]");
+  if (
+    (providerArg !== "openai" &&
+      providerArg !== "anthropic" &&
+      providerArg !== "google") ||
+    !apiKey
+  ) {
+    throw new Error(
+      "Usage: pnpm test:interpret <openai|anthropic|google> <apiKey> [url]",
+    );
   }
   const provider: Provider = providerArg;
   const url = urlArg ?? "https://nextjs.org";

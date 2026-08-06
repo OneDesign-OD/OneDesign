@@ -240,6 +240,7 @@ export function ExtractorCard() {
               >
                 <option value="anthropic">◆ Anthropic</option>
                 <option value="openai">◇ OpenAI</option>
+                <option value="google">◈ Google</option>
               </select>
               <div className="relative">
                 <input

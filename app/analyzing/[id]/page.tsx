@@ -565,7 +565,9 @@ function FailedState({
 }) {
   const router = useRouter();
   const [provider, setProvider] = useState(
-    defaultProvider === "openai" ? "openai" : "anthropic",
+    defaultProvider === "openai" || defaultProvider === "google"
+      ? defaultProvider
+      : "anthropic",
   );
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -633,6 +635,7 @@ function FailedState({
           >
             <option value="anthropic">◆ Anthropic</option>
             <option value="openai">◇ OpenAI</option>
+            <option value="google">◈ Google</option>
           </select>
           <div className="relative">
             <input

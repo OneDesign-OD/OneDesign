@@ -5,7 +5,7 @@ import { runUrlAnalysis } from "@/lib/pipeline";
 
 const requestSchema = z.object({
   url: z.url({ protocol: /^https?$/, message: "URL must use http or https" }),
-  provider: z.enum(["openai", "anthropic"]),
+  provider: z.enum(["openai", "anthropic", "google"]),
   apiKey: z.string().min(1),
 });
 

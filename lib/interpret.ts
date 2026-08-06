@@ -1,11 +1,12 @@
 import { generateObject, APICallError, NoObjectGeneratedError, RetryError } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import type { RawData } from "@/lib/extract";
 import { detectAmbiguities } from "@/lib/ambiguity";
 
-export type Provider = "openai" | "anthropic";
+export type Provider = "openai" | "anthropic" | "google";
 
 export type InterpretationErrorCode =
   "invalid_api_key" | "rate_limited" | "ai_response_invalid" | "ai_provider_error";
@@ -13,6 +14,7 @@ export type InterpretationErrorCode =
 const MODEL_IDS: Record<Provider, string> = {
   anthropic: "claude-opus-5",
   openai: "gpt-4o",
+  google: "gemini-flash-latest",
 };
 
 const designTokenSchema = z.object({
@@ -43,6 +45,9 @@ const MAX_PROMPT_CHARS = 40_000;
 function resolveModel(provider: Provider, apiKey: string) {
   if (provider === "anthropic") {
     return createAnthropic({ apiKey })(MODEL_IDS.anthropic);
+  }
+  if (provider === "google") {
+    return createGoogleGenerativeAI({ apiKey })(MODEL_IDS.google);
   }
   return createOpenAI({ apiKey })(MODEL_IDS.openai);
 }

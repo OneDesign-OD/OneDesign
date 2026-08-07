@@ -151,3 +151,40 @@ export async function runUrlAnalysis(
       .catch(() => {});
   }
 }
+
+/**
+ * Runs the image analysis pipeline for an already-created Analysis row (the
+ * image itself is already uploaded to blob storage by the API route before
+ * this is invoked — `imageUrl` is that blob URL). Intended to be invoked via
+ * `after()`, same as `runUrlAnalysis`.
+ *
+ * Currently just advances past "pending" — region detection, color/typography
+ * extraction, font-family guessing, ambiguity detection, AI interpretation,
+ * and markdown generation are wired in as later phases build them, at which
+ * point this reaches "complete"/"failed" like the URL pipeline does.
+ */
+export async function runImageAnalysis(
+  analysisId: string,
+  _imageUrl: string,
+  _provider: Provider,
+  _apiKey: string,
+) {
+  try {
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: { status: "extracting" },
+    });
+  } catch (err) {
+    console.error(`[pipeline] unexpected failure for ${analysisId}:`, err);
+    await prisma.analysis
+      .update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: "unknown_load_error",
+          errorMessage: "Something went wrong while analyzing this image.",
+        },
+      })
+      .catch(() => {});
+  }
+}

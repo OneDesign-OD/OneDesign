@@ -12,6 +12,7 @@
     "db:test": "tsx scripts/db-test.ts",
     "test:api": "tsx scripts/test-api.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
+    "test:image-pipeline": "tsx scripts/test-image-pipeline.ts",
     "test:extract": "tsx scripts/test-extract.ts",
     "test:ambiguity": "tsx scripts/test-ambiguity.ts",
     "test:interpret": "tsx scripts/test-interpret.ts"

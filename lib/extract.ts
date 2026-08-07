@@ -1,8 +1,17 @@
 import type { Page } from "playwright";
+import sharp from "sharp";
+import type { RegionWithColors } from "@/lib/colors";
+import {
+  estimateFontSize,
+  estimateFontWeight,
+  estimateLetterSpacing,
+  computeLineHeights,
+} from "@/lib/typography";
+import { computeSpacing, detectLayoutGroups, type LayoutHint } from "@/lib/layout";
 
 export type ExtractionErrorCode = "extraction_failed";
 
-type StyleProp =
+export type StyleProp =
   | "color"
   | "backgroundColor"
   | "borderColor"
@@ -22,7 +31,13 @@ type StyleProp =
 export type ExtractedElement = {
   label: string;
   tag: string;
-  styles: Record<StyleProp, string>;
+  // Partial rather than a full Record: the URL pipeline's getComputedStyle()
+  // always populates every prop, but the image pipeline can only report
+  // what it actually measured from pixels (e.g. no pixel equivalent of
+  // "position: relative") — omitting a prop is more honest than fabricating
+  // one. Consumers (ambiguity.ts, interpret.ts) already treat missing/falsy
+  // values as "no data" rather than assuming presence.
+  styles: Partial<Record<StyleProp, string>>;
 };
 
 export type RawData = {
@@ -75,6 +90,145 @@ export async function extractComputedStyles(
       errorMessage: `Failed to extract computed styles: ${message}`,
     };
   }
+}
+
+const MAX_LABEL_TEXT_LENGTH = 40;
+
+/**
+ * Assembles Phase 2-4's region + color + typography + layout data into the
+ * same `RawData` shape `extractComputedStyles` produces for the URL flow,
+ * so ambiguity-detection and AI-interpretation can run unmodified. Pure
+ * pixel math (plus the k-means clustering already done in Phase 3) — no AI
+ * calls in this function.
+ */
+export async function assembleImageRawData(
+  imageUrl: string,
+  imageBuffer: Buffer,
+  regions: RegionWithColors[],
+): Promise<ExtractResult> {
+  try {
+    if (regions.length === 0) {
+      return {
+        ok: false,
+        errorCode: "extraction_failed",
+        errorMessage: "No regions were detected to assemble into elements.",
+      };
+    }
+
+    const { data, info } = await sharp(imageBuffer)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const textRegions = regions.filter((r) => r.type === "text");
+    const lineHeights = computeLineHeights(textRegions);
+    const spacing = computeSpacing(regions);
+    const layoutHints = detectLayoutGroups(regions);
+
+    const elements = regions.map((region) =>
+      buildElement(region, {
+        pixels: data,
+        imageWidth: info.width,
+        imageHeight: info.height,
+        channels: info.channels,
+        lineHeightPx: lineHeights.get(region),
+        gapPx: spacing.get(region),
+        layoutHint: layoutHints.get(region),
+      }),
+    );
+
+    return {
+      ok: true,
+      data: {
+        url: imageUrl,
+        extractedAt: new Date().toISOString(),
+        sampleCount: elements.length,
+        elements,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      errorCode: "extraction_failed",
+      errorMessage: `Failed to assemble image raw data: ${message}`,
+    };
+  }
+}
+
+function buildElement(
+  region: RegionWithColors,
+  context: {
+    pixels: Buffer;
+    imageWidth: number;
+    imageHeight: number;
+    channels: number;
+    lineHeightPx: number | undefined;
+    gapPx: number | undefined;
+    layoutHint: LayoutHint | undefined;
+  },
+): ExtractedElement {
+  const styles: Partial<Record<StyleProp, string>> = {};
+
+  // colors[0] is the region's dominant cluster — for a block that's its
+  // fill; for a text line it's usually the background around the glyphs
+  // (see lib/colors.ts). colors[1], when present, is the minority cluster —
+  // for text that's the closest available signal for glyph/ink color.
+  if (region.colors[0]) styles.backgroundColor = rgbString(region.colors[0]);
+  if (region.type === "text" && region.colors[1]) {
+    styles.color = rgbString(region.colors[1]);
+  }
+
+  if (region.type === "text" && region.text) {
+    const fontSize = estimateFontSize(region);
+    if (fontSize !== undefined) {
+      styles.fontSize = `${fontSize}px`;
+      styles.letterSpacing = `${estimateLetterSpacing(region.text, region.box.width, fontSize)}px`;
+    }
+
+    const fontWeight = estimateFontWeight(
+      context.pixels,
+      context.imageWidth,
+      context.imageHeight,
+      context.channels,
+      region,
+      fontSize,
+    );
+    if (fontWeight !== undefined) styles.fontWeight = fontWeight;
+
+    if (context.lineHeightPx !== undefined) styles.lineHeight = `${context.lineHeightPx}px`;
+  }
+
+  if (context.gapPx !== undefined) styles.gap = `${context.gapPx}px`;
+  if (context.layoutHint) {
+    styles.display = context.layoutHint.display;
+    styles.flexDirection = context.layoutHint.flexDirection;
+  }
+
+  return {
+    label: labelFor(region),
+    tag: region.type,
+    styles,
+  };
+}
+
+function labelFor(region: RegionWithColors): string {
+  if (region.type === "text" && region.text) {
+    const truncated =
+      region.text.length > MAX_LABEL_TEXT_LENGTH
+        ? `${region.text.slice(0, MAX_LABEL_TEXT_LENGTH)}…`
+        : region.text;
+    return `text "${truncated}"`;
+  }
+  return `block (${region.box.width}×${region.box.height})`;
+}
+
+function rgbString(hex: string): string {
+  const value = hex.replace("#", "");
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 /**

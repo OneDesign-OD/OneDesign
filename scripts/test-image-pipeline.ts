@@ -1,7 +1,8 @@
 // Integration check for the image analysis pipeline, extended phase by
 // phase as lib/pipeline.ts's runImageAnalysis grows.
 //
-// - Region detection (Phase 2) and color extraction (Phase 3) run in-process
+// - Region detection (Phase 2), color extraction (Phase 3), and typography/
+//   layout measurement + rawData assembly (Phase 4) all run in-process
 //   against a synthetic sample design (scripts/fixtures/sample-design.ts) —
 //   no dev server or database required.
 // - Upload infra (Phase 1) checks POST /api/analyze/image end to end: file
@@ -12,7 +13,8 @@
 // Usage: pnpm test:image-pipeline [baseUrl]
 import sharp from "sharp";
 import { detectRegions, type Region } from "@/lib/regions";
-import { extractColors } from "@/lib/colors";
+import { extractColors, type RegionWithColors } from "@/lib/colors";
+import { assembleImageRawData } from "@/lib/extract";
 import { buildSampleDesignSvg, SAMPLE_DESIGN } from "./fixtures/sample-design";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
@@ -88,7 +90,7 @@ async function testRegionDetection(png: Buffer): Promise<Region[]> {
   return regions;
 }
 
-async function testColorExtraction(png: Buffer, regions: Region[]) {
+async function testColorExtraction(png: Buffer, regions: Region[]): Promise<RegionWithColors[]> {
   console.log("--- Phase 3: color extraction (in-process, no server needed) ---");
 
   const result = await extractColors(png, regions);
@@ -107,6 +109,22 @@ async function testColorExtraction(png: Buffer, regions: Region[]) {
   console.log("\nGround truth colors:", JSON.stringify(SAMPLE_DESIGN.colors));
 
   console.log("\n✓ color extraction produced a sane result — sanity-check the colors above\n");
+  return result.regions;
+}
+
+async function testRawDataAssembly(png: Buffer, regions: RegionWithColors[]) {
+  console.log("--- Phase 4: typography/layout measurement + rawData assembly (in-process) ---");
+
+  const result = await assembleImageRawData("test://sample-design", png, regions);
+  assert(result.ok, `rawData assembly failed: ${!result.ok ? result.errorMessage : ""}`);
+
+  assert(result.data.elements.length === regions.length, "expected one element per region");
+  console.log(`✓ assembled rawData with ${result.data.elements.length} elements`);
+
+  console.log("\nFull assembled rawData:");
+  console.log(JSON.stringify(result.data, null, 2));
+
+  console.log("\n✓ rawData assembly produced a sane result — sanity-check the values above\n");
 }
 
 async function testUploadInfra() {
@@ -170,7 +188,8 @@ async function testUploadInfra() {
 async function main() {
   const png = await renderSampleImage();
   const regions = await testRegionDetection(png);
-  await testColorExtraction(png, regions);
+  const coloredRegions = await testColorExtraction(png, regions);
+  await testRawDataAssembly(png, coloredRegions);
   await testUploadInfra();
 
   console.log("\nAll checks passed.");

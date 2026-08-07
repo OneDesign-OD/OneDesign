@@ -176,7 +176,9 @@ function detectTypographyInconsistencies(elements: ExtractedElement[]): Ambiguit
     if (matches.length < 2) continue;
 
     for (const property of ["fontSize", "fontWeight"] as const) {
-      const values = new Set(matches.map((el) => el.styles[property]));
+      const values = new Set(
+        matches.map((el) => el.styles[property]).filter((v) => v !== undefined),
+      );
       if (values.size > 1) {
         flags.push({
           type: "typography_inconsistency",

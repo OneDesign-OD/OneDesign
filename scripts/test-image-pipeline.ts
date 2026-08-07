@@ -1,9 +1,9 @@
 // Integration check for the image analysis pipeline, extended phase by
 // phase as lib/pipeline.ts's runImageAnalysis grows.
 //
-// - Region detection (Phase 2) runs in-process against a synthetic sample
-//   design (scripts/fixtures/sample-design.ts) — no dev server or database
-//   required.
+// - Region detection (Phase 2) and color extraction (Phase 3) run in-process
+//   against a synthetic sample design (scripts/fixtures/sample-design.ts) —
+//   no dev server or database required.
 // - Upload infra (Phase 1) checks POST /api/analyze/image end to end: file
 //   validation, Vercel Blob upload, and Analysis row creation. Requires a
 //   dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN and
@@ -11,7 +11,8 @@
 //
 // Usage: pnpm test:image-pipeline [baseUrl]
 import sharp from "sharp";
-import { detectRegions } from "@/lib/regions";
+import { detectRegions, type Region } from "@/lib/regions";
+import { extractColors } from "@/lib/colors";
 import { buildSampleDesignSvg, SAMPLE_DESIGN } from "./fixtures/sample-design";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
@@ -52,11 +53,13 @@ async function pollUntilStatusChanges(
   throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
 }
 
-async function testRegionDetection() {
-  console.log("--- Phase 2: region detection (in-process, no server needed) ---");
-
+async function renderSampleImage(): Promise<Buffer> {
   const svg = buildSampleDesignSvg();
-  const png = await sharp(Buffer.from(svg)).png().toBuffer();
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function testRegionDetection(png: Buffer): Promise<Region[]> {
+  console.log("--- Phase 2: region detection (in-process, no server needed) ---");
 
   const result = await detectRegions(png);
   assert(result.ok, `region detection failed: ${!result.ok ? result.errorMessage : ""}`);
@@ -82,6 +85,28 @@ async function testRegionDetection() {
   console.log("\nGround truth boxes:", JSON.stringify(SAMPLE_DESIGN.boxes));
 
   console.log("\n✓ region detection produced a sane result — sanity-check the boxes above\n");
+  return regions;
+}
+
+async function testColorExtraction(png: Buffer, regions: Region[]) {
+  console.log("--- Phase 3: color extraction (in-process, no server needed) ---");
+
+  const result = await extractColors(png, regions);
+  assert(result.ok, `color extraction failed: ${!result.ok ? result.errorMessage : ""}`);
+
+  assert(
+    result.regions.every((r) => Array.isArray(r.colors)),
+    "expected every region to have a colors array",
+  );
+  console.log(`✓ extracted colors for ${result.regions.length} regions`);
+
+  console.log("\nColors per region (compare against ground truth below):");
+  for (const r of result.regions) {
+    console.log(`  ${JSON.stringify({ type: r.type, box: r.box, text: r.text, colors: r.colors })}`);
+  }
+  console.log("\nGround truth colors:", JSON.stringify(SAMPLE_DESIGN.colors));
+
+  console.log("\n✓ color extraction produced a sane result — sanity-check the colors above\n");
 }
 
 async function testUploadInfra() {
@@ -143,7 +168,9 @@ async function testUploadInfra() {
 }
 
 async function main() {
-  await testRegionDetection();
+  const png = await renderSampleImage();
+  const regions = await testRegionDetection(png);
+  await testColorExtraction(png, regions);
   await testUploadInfra();
 
   console.log("\nAll checks passed.");

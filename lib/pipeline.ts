@@ -1,12 +1,19 @@
 import { put } from "@vercel/blob";
 import { loadPage } from "@/lib/browser";
-import { extractComputedStyles, assembleImageRawData, type RawData } from "@/lib/extract";
+import {
+  extractComputedStyles,
+  assembleImageRawData,
+  assembleGithubRawData,
+  type RawData,
+} from "@/lib/extract";
 import { interpretDesign, type Provider } from "@/lib/interpret";
 import { generateMarkdown } from "@/lib/markdown";
 import { detectRegions } from "@/lib/regions";
 import { extractColors } from "@/lib/colors";
 import { guessFontFamily } from "@/lib/fontguess";
 import { parseGithubRepoUrl, fetchCandidateFiles } from "@/lib/github";
+import { fetchAndParseCandidate, type ExtractedValues } from "@/lib/cssparse";
+import { rankExtractedValues } from "@/lib/rank";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -314,18 +321,19 @@ export async function runImageAnalysis(
  * Runs the GitHub repo analysis pipeline for an already-created Analysis
  * row. Intended to be invoked via `after()`, same as the other two flows.
  *
- * Currently only proves candidate-file collection works end to end (repo
- * lookup + tree fetch + filtering, correctly propagating repo_not_found /
- * github_rate_limited / no_styles_found to status "failed") — fetching and
- * parsing stylesheet content, ranking values, and AI interpretation are
- * wired in as later phases build them, at which point this reaches
- * "complete"/"failed" like the other two pipelines do.
+ * Chains: candidate-file collection (repo lookup + tree fetch + filtering)
+ * -> fetch + parse each candidate's stylesheet content -> tally/rank/
+ * normalize values by frequency -> assemble rawData -> AI interpretation
+ * (ambiguity detection happens inside interpretDesign, same as the other
+ * two flows) -> markdown generation. Deliberately never clones, installs,
+ * builds, or executes anything from the target repo — see lib/github.ts and
+ * lib/cssparse.ts, which only ever read file content as text.
  */
 export async function runGithubAnalysis(
   analysisId: string,
   repoUrl: string,
-  _provider: Provider,
-  _apiKey: string,
+  provider: Provider,
+  apiKey: string,
 ) {
   try {
     await prisma.analysis.update({
@@ -360,6 +368,89 @@ export async function runGithubAnalysis(
       });
       return;
     }
+
+    const totals: ExtractedValues = { colors: [], fontSizes: [], fontFamilies: [], spacing: [] };
+    for (const file of candidates.files) {
+      const extracted = await fetchAndParseCandidate(
+        parsed.owner,
+        parsed.repo,
+        candidates.branch,
+        file,
+      );
+      if (!extracted) continue;
+      totals.colors.push(...extracted.colors);
+      totals.fontSizes.push(...extracted.fontSizes);
+      totals.fontFamilies.push(...extracted.fontFamilies);
+      totals.spacing.push(...extracted.spacing);
+    }
+
+    const ranked = rankExtractedValues(totals);
+    const rawDataResult = assembleGithubRawData(repoUrl, ranked);
+    if (!rawDataResult.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: rawDataResult.errorCode,
+          errorMessage: rawDataResult.errorMessage,
+        },
+      });
+      return;
+    }
+
+    const rawData = rawDataResult.data;
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "analyzing",
+        rawData: rawData as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const interpretation = await interpretDesign(rawData, provider, apiKey);
+
+    if (!interpretation.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: interpretation.errorCode,
+          errorMessage: interpretation.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "generating",
+        aiOutput: interpretation.data as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const formatted = generateMarkdown(repoUrl, interpretation.data);
+
+    if (!formatted.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: formatted.errorCode,
+          errorMessage: formatted.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "complete",
+        markdown: formatted.markdown,
+      },
+    });
   } catch (err) {
     console.error(`[pipeline] unexpected failure for ${analysisId}:`, err);
     await prisma.analysis

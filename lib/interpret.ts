@@ -52,6 +52,39 @@ export function resolveModel(provider: Provider, apiKey: string) {
   return createOpenAI({ apiKey })(MODEL_IDS.openai);
 }
 
+// Framing the source accurately matters, not just for tone: telling the
+// model this is "a live-rendered web page" when it's actually a pixel
+// measurement or a GitHub frequency scan invites it to reason about things
+// that don't apply here (e.g. cascading/computed behavior for a repo scan).
+const SOURCE_DESCRIPTIONS: Record<
+  RawData["sourceType"],
+  { intro: string; sourceLabel: string; sampleLabel: string }
+> = {
+  url: {
+    intro: "You are analyzing computed CSS styles sampled from a real, live-rendered web page.",
+    sourceLabel: "Page",
+    sampleLabel: "Sampled elements",
+  },
+  image: {
+    intro:
+      "You are analyzing colors, typography, and layout measured directly from pixels in a " +
+      "UI screenshot — via OCR text detection, k-means color sampling, and geometric layout " +
+      "analysis, not AI guessing.",
+    sourceLabel: "Screenshot",
+    sampleLabel: "Sampled regions",
+  },
+  github: {
+    intro:
+      "You are analyzing color, typography, and spacing values parsed directly from a GitHub " +
+      "repository's stylesheets (CSS/SCSS/Sass and CSS-in-JS), ranked by how frequently each " +
+      "exact value appears across the codebase — the most-used values represent the real " +
+      "design system, even without a dedicated tokens file. Each sample's usageCount is that " +
+      "real frequency, not an estimate.",
+    sourceLabel: "Repository",
+    sampleLabel: "Ranked values",
+  },
+};
+
 function buildPrompt(rawData: RawData, ambiguityFlags: unknown): string {
   let elements = rawData.elements;
   let elementsJson = JSON.stringify(elements);
@@ -62,16 +95,18 @@ function buildPrompt(rawData: RawData, ambiguityFlags: unknown): string {
     elementsJson = JSON.stringify(elements);
   }
 
+  const { intro, sourceLabel, sampleLabel } = SOURCE_DESCRIPTIONS[rawData.sourceType];
+
   return [
-    "You are analyzing computed CSS styles sampled from a real, live-rendered web page.",
+    intro,
     "Interpret this ground-truth data into a small set of named design tokens covering colors, typography, spacing, and layout patterns.",
     'For each token, give a short human-readable name, its concrete value, and a one-sentence rationale describing where/how it\'s used (e.g. "Primary Blue — used consistently across CTAs and links").',
     "",
-    `Page: ${rawData.url}`,
-    `Sampled elements (${elements.length} of ${rawData.sampleCount} total):`,
+    `${sourceLabel}: ${rawData.url}`,
+    `${sampleLabel} (${elements.length} of ${rawData.sampleCount} total):`,
     elementsJson,
     "",
-    "A deterministic heuristic pass flagged the following possible ambiguities in the raw data — near-duplicate colors that may be the same intended token, spacing values that don't fit the dominant scale, and inconsistent typography across elements of the same apparent role. Use these to decide which values should collapse into a single token vs. stay distinct:",
+    "A deterministic heuristic pass flagged the following possible ambiguities in the raw data — near-duplicate colors that may be the same intended token (when usageCounts are present, near-equal counts are a stronger signal of that), spacing values that don't fit the dominant scale, and inconsistent typography across elements of the same apparent role. Use these to decide which values should collapse into a single token vs. stay distinct:",
     JSON.stringify(ambiguityFlags),
   ].join("\n");
 }

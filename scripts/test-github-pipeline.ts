@@ -9,11 +9,17 @@
 //   real (unauthenticated) calls to the public GitHub API and
 //   raw.githubusercontent.com.
 // - Upload infra (Phase 1) checks POST /api/analyze/github end to end:
-//   request validation, Analysis row creation, and that the real pipeline
-//   correctly reaches "failed" with the right error code for a bad repo.
-//   Requires a dev server running (`pnpm dev`) with DATABASE_URL set.
+//   request validation and that a nonexistent repo correctly fails with
+//   "repo_not_found" through the real pipeline.
+// - The full pipeline (Phase 4, lib/pipeline.ts's runGithubAnalysis) is run
+//   end to end through the real endpoint with the sample repo: candidate
+//   collection -> fetch/parse -> rank/assemble -> AI interpretation ->
+//   markdown. With a fake key it should succeed through every non-AI stage
+//   and fail only at AI interpretation; pass a real provider + key as extra
+//   args to see the actual generated markdown.
+//   Both require a dev server running (`pnpm dev`) with DATABASE_URL set.
 //
-// Usage: pnpm test:github-pipeline [baseUrl] [repoUrl]
+// Usage: pnpm test:github-pipeline [baseUrl] [repoUrl] [openai|anthropic|google] [realApiKey]
 import { fetchCandidateFiles, parseGithubRepoUrl, type CandidateFile } from "@/lib/github";
 import { fetchAndParseCandidate, type ExtractedValues } from "@/lib/cssparse";
 import { rankExtractedValues } from "@/lib/rank";
@@ -21,6 +27,8 @@ import { assembleGithubRawData } from "@/lib/extract";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 const sampleRepoUrl = process.argv[3] ?? "https://github.com/necolas/normalize.css";
+const realProvider = process.argv[4];
+const realApiKey = process.argv[5];
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
@@ -32,21 +40,6 @@ type StatusResponse = {
   errorMessage: string | null;
   markdown: string | null;
 };
-
-async function pollUntilStatusChanges(
-  id: string,
-  from: string,
-  timeoutMs = 20_000,
-): Promise<StatusResponse> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
-    const status = (await res.json()) as StatusResponse;
-    if (status.status !== from) return status;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
-}
 
 async function pollUntilTerminal(id: string, timeoutMs = 20_000): Promise<StatusResponse> {
   const terminal = new Set(["complete", "failed"]);
@@ -190,29 +183,7 @@ async function testUploadInfra() {
   assert(invalidRes.status === 400, `expected 400 for invalid repoUrl, got ${invalidRes.status}`);
   console.log("✓ invalid repoUrl rejected with 400");
 
-  // 2. Valid request creates a row and kicks off the pipeline.
-  const createRes = await fetch(`${baseUrl}/api/analyze/github`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      repoUrl: sampleRepoUrl,
-      provider: "anthropic",
-      apiKey: "test-key-not-a-real-secret",
-    }),
-  });
-  assert(createRes.status === 200, `expected 200 from create, got ${createRes.status}`);
-  const created = (await createRes.json()) as { id?: string };
-  assert(typeof created.id === "string" && created.id.length > 0, "response missing id");
-  console.log("✓ created analysis:", created.id);
-
-  const status = await pollUntilStatusChanges(created.id, "pending");
-  assert(
-    status.status === "extracting",
-    `expected status to advance to "extracting" (candidate collection succeeded, nothing further wired up yet), got ${status.status}`,
-  );
-  console.log("✓ analysis advanced to status: extracting");
-
-  // 3. A repo that doesn't exist should reach "failed" with the right code.
+  // 2. A repo that doesn't exist should reach "failed" with the right code.
   const badCreateRes = await fetch(`${baseUrl}/api/analyze/github`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -232,11 +203,62 @@ async function testUploadInfra() {
   console.log('✓ nonexistent repo correctly failed with "repo_not_found" through the full pipeline');
 }
 
+async function testFullPipeline() {
+  console.log(`--- Phase 4: full pipeline end-to-end (requires dev server at ${baseUrl}) ---`);
+
+  // A deliberately fake key: a healthy run should sail through candidate
+  // collection, stylesheet fetch/parse, and ranking/assembly, then fail at
+  // AI interpretation with "invalid_api_key" — proving the whole chain up
+  // to that boundary works, without needing a real key.
+  const fakeCreateRes = await fetch(`${baseUrl}/api/analyze/github`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repoUrl: sampleRepoUrl,
+      provider: "anthropic",
+      apiKey: "test-key-not-a-real-secret",
+    }),
+  });
+  assert(fakeCreateRes.status === 200, `expected 200 from create, got ${fakeCreateRes.status}`);
+  const { id: fakeId } = (await fakeCreateRes.json()) as { id: string };
+  const fakeStatus = await pollUntilTerminal(fakeId);
+  assert(
+    fakeStatus.status === "failed" && fakeStatus.errorCode === "invalid_api_key",
+    `expected the full chain to fail only at AI interpretation with "invalid_api_key", got: ${JSON.stringify(fakeStatus)}`,
+  );
+  console.log(
+    "✓ full chain (candidate collection -> fetch/parse -> rank/assemble -> ...) succeeded, correctly rejected only at AI interpretation",
+  );
+
+  if (realProvider && realApiKey) {
+    const realCreateRes = await fetch(`${baseUrl}/api/analyze/github`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoUrl: sampleRepoUrl, provider: realProvider, apiKey: realApiKey }),
+    });
+    assert(realCreateRes.status === 200, `expected 200 from create, got ${realCreateRes.status}`);
+    const { id: realId } = (await realCreateRes.json()) as { id: string };
+    const realStatus = await pollUntilTerminal(realId);
+    assert(
+      realStatus.status === "complete" && !!realStatus.markdown,
+      `expected the full chain to reach status "complete" with markdown, got ${realStatus.status} (errorCode: ${realStatus.errorCode})`,
+    );
+    console.log("✓ full chain reached status: complete");
+    console.log("\n--- generated markdown ---");
+    console.log(realStatus.markdown);
+  } else {
+    console.log(
+      "\n(skipping the real end-to-end run — pass [openai|anthropic|google] [realApiKey] as extra args to see actual markdown output)",
+    );
+  }
+}
+
 async function main() {
   const { owner, repo, branch, files } = await testCandidateFileCollection();
   const totals = await testStylesheetParsing(owner, repo, branch, files);
   await testRankingAndAssembly(sampleRepoUrl, totals);
   await testUploadInfra();
+  await testFullPipeline();
 
   console.log("\nAll checks passed.");
 }

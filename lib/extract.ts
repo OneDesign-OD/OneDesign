@@ -58,7 +58,15 @@ export type FontFamilyGuess = {
   confidence: "estimated";
 };
 
+// Lets the AI-interpretation prompt (lib/interpret.ts) describe the data
+// accurately instead of always assuming a live-rendered web page — that
+// framing is actively misleading for pixel-measured or source-code-derived
+// data, not just cosmetically wrong (e.g. it invites reasoning about
+// cascading/computed behavior that doesn't apply to a GitHub frequency scan).
+export type RawDataSourceType = "url" | "image" | "github";
+
 export type RawData = {
+  sourceType: RawDataSourceType;
   url: string;
   extractedAt: string;
   sampleCount: number;
@@ -95,6 +103,7 @@ export async function extractComputedStyles(
     return {
       ok: true,
       data: {
+        sourceType: "url",
         url,
         extractedAt: new Date().toISOString(),
         sampleCount: elements.length,
@@ -159,6 +168,7 @@ export async function assembleImageRawData(
     return {
       ok: true,
       data: {
+        sourceType: "image",
         url: imageUrl,
         extractedAt: new Date().toISOString(),
         sampleCount: elements.length,
@@ -283,6 +293,7 @@ export function assembleGithubRawData(
   return {
     ok: true,
     data: {
+      sourceType: "github",
       url: repoUrl,
       extractedAt: new Date().toISOString(),
       sampleCount: elements.length,
@@ -296,10 +307,18 @@ function rankedValueToElement(
   styleProp: StyleProp,
   ranked: RankedValue,
 ): ExtractedElement {
+  // Colors are ranked/displayed as hex, but ambiguity.ts's duplicate-color
+  // detection only recognizes "rgb(...)" strings (same convention the URL
+  // and image pipelines already use) — convert so it isn't silently skipped.
+  const styleValue =
+    styleProp === "color" && ranked.value.startsWith("#")
+      ? rgbString(ranked.value)
+      : ranked.value;
+
   return {
     label: `${category} ${ranked.value}`,
     tag: category,
-    styles: { [styleProp]: ranked.value },
+    styles: { [styleProp]: styleValue },
     usageCount: ranked.usageCount,
   };
 }

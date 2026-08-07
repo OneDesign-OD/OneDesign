@@ -10,6 +10,10 @@ export type AmbiguityFlag =
       values: [string, string];
       distance: number;
       elements: string[];
+      // Only present when both colors' elements carry usage-frequency data
+      // (the GitHub pipeline) — near-equal counts are a stronger signal the
+      // two were meant to be the same token than visual similarity alone.
+      usageCounts?: [number, number];
     }
   | {
       type: "spacing_outlier";
@@ -52,17 +56,22 @@ export function detectAmbiguities(rawData: RawData): AmbiguityReport {
   };
 }
 
+type ColorUsage = { labels: string[]; usageCount?: number };
+
 function detectDuplicateColors(elements: ExtractedElement[]): AmbiguityFlag[] {
   const flags: AmbiguityFlag[] = [];
 
   for (const property of COLOR_PROPERTIES) {
-    const usages = new Map<string, string[]>();
+    const usages = new Map<string, ColorUsage>();
     for (const el of elements) {
       const value = el.styles[property];
       if (!value || TRANSPARENT.has(value)) continue;
-      const list = usages.get(value) ?? [];
-      list.push(el.label);
-      usages.set(value, list);
+      const entry = usages.get(value) ?? { labels: [] };
+      entry.labels.push(el.label);
+      if (el.usageCount !== undefined) {
+        entry.usageCount = (entry.usageCount ?? 0) + el.usageCount;
+      }
+      usages.set(value, entry);
     }
 
     const colors = Array.from(usages.keys());
@@ -75,15 +84,18 @@ function detectDuplicateColors(elements: ExtractedElement[]): AmbiguityFlag[] {
 
         const distance = colorDistance(a, b);
         if (distance > 0 && distance <= COLOR_DISTANCE_THRESHOLD) {
+          const usageA = usages.get(colors[i])!;
+          const usageB = usages.get(colors[j])!;
+
           flags.push({
             type: "duplicate_color",
             property,
             values: [colors[i], colors[j]],
             distance: Math.round(distance * 10) / 10,
-            elements: [
-              ...(usages.get(colors[i]) ?? []),
-              ...(usages.get(colors[j]) ?? []),
-            ],
+            elements: [...usageA.labels, ...usageB.labels],
+            ...(usageA.usageCount !== undefined && usageB.usageCount !== undefined
+              ? { usageCounts: [usageA.usageCount, usageB.usageCount] as [number, number] }
+              : {}),
           });
         }
       }

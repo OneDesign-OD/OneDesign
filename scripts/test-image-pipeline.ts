@@ -15,6 +15,12 @@
 //   validation, Vercel Blob upload, and Analysis row creation. Requires a
 //   dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN and
 //   DATABASE_URL set.
+// - The full pipeline (Phase 7, lib/pipeline.ts's runImageAnalysis) is run
+//   end to end through the real upload endpoint with the rich sample-design
+//   image: region detection -> colors -> typography/layout -> rawData ->
+//   font guess -> AI interpretation -> markdown. With a fake key it should
+//   succeed through every pixel-math stage and fail only at AI
+//   interpretation; pass a real key to see the actual generated markdown.
 //
 // Usage: pnpm test:image-pipeline [baseUrl] [openai|anthropic|google] [realApiKey]
 import sharp from "sharp";
@@ -64,6 +70,18 @@ async function pollUntilStatusChanges(
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
+}
+
+async function pollUntilTerminal(id: string, timeoutMs = 45_000): Promise<StatusResponse> {
+  const terminal = new Set(["complete", "failed"]);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
+    const status = (await res.json()) as StatusResponse;
+    if (terminal.has(status.status)) return status;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`timed out waiting for ${id} to reach a terminal status`);
 }
 
 async function renderSampleImage(): Promise<Buffer> {
@@ -242,6 +260,59 @@ async function testUploadInfra() {
   console.log("✓ analysis advanced to status: extracting, screenshotUrl set:", status.screenshotUrl);
 }
 
+async function testFullPipeline(png: Buffer) {
+  console.log(`--- Phase 7: full pipeline end-to-end (requires dev server at ${baseUrl}) ---`);
+
+  // A deliberately fake key: a healthy run should sail through region
+  // detection, color extraction, typography/layout measurement, and the
+  // font-family guess (which fails open, non-fatally), then fail at AI
+  // interpretation with "invalid_api_key" — proving the whole chain up to
+  // that boundary works, without needing a real key.
+  const fakeForm = new FormData();
+  fakeForm.append("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "sample-design.png");
+  fakeForm.append("provider", "anthropic");
+  fakeForm.append("apiKey", "test-key-not-a-real-secret");
+  const fakeCreateRes = await fetch(`${baseUrl}/api/analyze/image`, {
+    method: "POST",
+    body: fakeForm,
+  });
+  assert(fakeCreateRes.status === 200, `expected 200 from create, got ${fakeCreateRes.status}`);
+  const { id: fakeId } = (await fakeCreateRes.json()) as { id: string };
+  const fakeStatus = await pollUntilTerminal(fakeId);
+  assert(
+    fakeStatus.status === "failed" && fakeStatus.errorCode === "invalid_api_key",
+    `expected the full chain to fail only at AI interpretation with "invalid_api_key", got: ${JSON.stringify(fakeStatus)}`,
+  );
+  console.log(
+    "✓ full chain (region detection -> colors -> typography/layout -> font guess -> ...) succeeded, correctly rejected only at AI interpretation",
+  );
+
+  if (realProvider && realApiKey) {
+    const realForm = new FormData();
+    realForm.append("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "sample-design.png");
+    realForm.append("provider", realProvider);
+    realForm.append("apiKey", realApiKey);
+    const realCreateRes = await fetch(`${baseUrl}/api/analyze/image`, {
+      method: "POST",
+      body: realForm,
+    });
+    assert(realCreateRes.status === 200, `expected 200 from create, got ${realCreateRes.status}`);
+    const { id: realId } = (await realCreateRes.json()) as { id: string };
+    const realStatus = await pollUntilTerminal(realId);
+    assert(
+      realStatus.status === "complete" && !!realStatus.markdown,
+      `expected the full chain to reach status "complete" with markdown, got ${realStatus.status} (errorCode: ${realStatus.errorCode})`,
+    );
+    console.log("✓ full chain reached status: complete");
+    console.log("\n--- generated markdown ---");
+    console.log(realStatus.markdown);
+  } else {
+    console.log(
+      "\n(skipping the real end-to-end run — pass [openai|anthropic|google] [realApiKey] to see actual markdown output)",
+    );
+  }
+}
+
 async function main() {
   const png = await renderSampleImage();
   const regions = await testRegionDetection(png);
@@ -250,6 +321,7 @@ async function main() {
   await testAmbiguityDetection(rawData);
   await testFontGuess(png, regions);
   await testUploadInfra();
+  await testFullPipeline(png);
 
   console.log("\nAll checks passed.");
 }

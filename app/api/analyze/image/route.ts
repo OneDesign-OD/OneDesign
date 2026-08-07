@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     },
   });
 
-  after(() => runImageAnalysis(analysis.id, blob.url, provider, apiKey));
+  after(() => runImageAnalysis(analysis.id, buffer, blob.url, provider, apiKey));
 
   return NextResponse.json({ id: analysis.id });
 }

@@ -1,8 +1,11 @@
 import { put } from "@vercel/blob";
 import { loadPage } from "@/lib/browser";
-import { extractComputedStyles, type RawData } from "@/lib/extract";
+import { extractComputedStyles, assembleImageRawData, type RawData } from "@/lib/extract";
 import { interpretDesign, type Provider } from "@/lib/interpret";
 import { generateMarkdown } from "@/lib/markdown";
+import { detectRegions } from "@/lib/regions";
+import { extractColors } from "@/lib/colors";
+import { guessFontFamily } from "@/lib/fontguess";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -155,24 +158,141 @@ export async function runUrlAnalysis(
 /**
  * Runs the image analysis pipeline for an already-created Analysis row (the
  * image itself is already uploaded to blob storage by the API route before
- * this is invoked — `imageUrl` is that blob URL). Intended to be invoked via
- * `after()`, same as `runUrlAnalysis`.
+ * this is invoked — `imageBuffer` is the same bytes, kept in memory to avoid
+ * re-fetching them back from blob storage; `imageUrl` is that blob URL, used
+ * only for display/labeling). Intended to be invoked via `after()`, same as
+ * `runUrlAnalysis`.
  *
- * Currently just advances past "pending" — region detection, color/typography
- * extraction, font-family guessing, ambiguity detection, AI interpretation,
- * and markdown generation are wired in as later phases build them, at which
- * point this reaches "complete"/"failed" like the URL pipeline does.
+ * Chains: region detection -> color extraction -> typography/layout
+ * measurement -> rawData assembly -> font-family guess (best-effort, never
+ * blocks the rest) -> AI interpretation (ambiguity detection happens inside
+ * interpretDesign, same as the URL flow) -> markdown generation. Deliberately
+ * never sends the full image to a vision model — see lib/regions.ts,
+ * lib/colors.ts, lib/typography.ts, lib/layout.ts for the pixel-math stages,
+ * and lib/fontguess.ts for the one narrow, cropped-sample AI-vision call.
  */
 export async function runImageAnalysis(
   analysisId: string,
-  _imageUrl: string,
-  _provider: Provider,
-  _apiKey: string,
+  imageBuffer: Buffer,
+  imageUrl: string,
+  provider: Provider,
+  apiKey: string,
 ) {
   try {
     await prisma.analysis.update({
       where: { id: analysisId },
       data: { status: "extracting" },
+    });
+
+    const regionsResult = await detectRegions(imageBuffer);
+    if (!regionsResult.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: regionsResult.errorCode,
+          errorMessage: regionsResult.errorMessage,
+        },
+      });
+      return;
+    }
+
+    const colorsResult = await extractColors(imageBuffer, regionsResult.regions);
+    if (!colorsResult.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: colorsResult.errorCode,
+          errorMessage: colorsResult.errorMessage,
+        },
+      });
+      return;
+    }
+
+    const rawDataResult = await assembleImageRawData(imageUrl, imageBuffer, colorsResult.regions);
+    if (!rawDataResult.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: rawDataResult.errorCode,
+          errorMessage: rawDataResult.errorMessage,
+        },
+      });
+      return;
+    }
+
+    let rawData: RawData = rawDataResult.data;
+
+    const fontGuessResult = await guessFontFamily(
+      imageBuffer,
+      regionsResult.regions,
+      provider,
+      apiKey,
+    );
+    if (fontGuessResult.ok) {
+      rawData = { ...rawData, fontFamilyGuess: fontGuessResult.guess };
+    } else {
+      // Nice-to-have, not structural data — log and continue without it
+      // rather than failing the whole analysis.
+      console.error(
+        `[pipeline] font-family guess failed for ${analysisId} (non-fatal):`,
+        fontGuessResult.errorCode,
+        fontGuessResult.errorMessage,
+      );
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "analyzing",
+        rawData: rawData as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const interpretation = await interpretDesign(rawData, provider, apiKey);
+
+    if (!interpretation.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: interpretation.errorCode,
+          errorMessage: interpretation.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "generating",
+        aiOutput: interpretation.data as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    const formatted = generateMarkdown(imageUrl, interpretation.data);
+
+    if (!formatted.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: formatted.errorCode,
+          errorMessage: formatted.errorMessage,
+        },
+      });
+      return;
+    }
+
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: {
+        status: "complete",
+        markdown: formatted.markdown,
+      },
     });
   } catch (err) {
     console.error(`[pipeline] unexpected failure for ${analysisId}:`, err);

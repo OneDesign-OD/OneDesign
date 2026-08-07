@@ -57,21 +57,6 @@ function samplePngBlob(): Blob {
   return new Blob([Buffer.from(ONE_PIXEL_PNG_BASE64, "base64")], { type: "image/png" });
 }
 
-async function pollUntilStatusChanges(
-  id: string,
-  from: string,
-  timeoutMs = 15_000,
-): Promise<StatusResponse> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
-    const status = (await res.json()) as StatusResponse;
-    if (status.status !== from) return status;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
-}
-
 async function pollUntilTerminal(id: string, timeoutMs = 45_000): Promise<StatusResponse> {
   const terminal = new Set(["complete", "failed"]);
   const start = Date.now();
@@ -248,16 +233,20 @@ async function testUploadInfra() {
   assert(typeof created.id === "string" && created.id.length > 0, "response missing id");
   console.log("✓ created analysis:", created.id);
 
-  const status = await pollUntilStatusChanges(created.id, "pending");
+  // Now that the full chain is wired (Phase 7), a 1x1 pixel image correctly
+  // fails fast — it has zero detectable regions — rather than stopping at
+  // "extracting". Polling for "leaves pending" would race against how
+  // quickly that failure happens, so poll to terminal instead.
+  const status = await pollUntilTerminal(created.id);
   assert(
-    status.status === "extracting",
-    `expected status to advance to "extracting", got ${status.status}`,
+    status.status === "failed" && status.errorCode === "extraction_failed",
+    `expected a 1x1 pixel image to correctly fail with "extraction_failed" (no detectable regions), got: ${JSON.stringify(status)}`,
   );
   assert(
     typeof status.screenshotUrl === "string" && status.screenshotUrl.length > 0,
-    "expected screenshotUrl to be set to the uploaded blob URL",
+    "expected screenshotUrl to be set to the uploaded blob URL even though extraction failed",
   );
-  console.log("✓ analysis advanced to status: extracting, screenshotUrl set:", status.screenshotUrl);
+  console.log("✓ analysis correctly failed with extraction_failed, screenshotUrl set:", status.screenshotUrl);
 }
 
 async function testFullPipeline(png: Buffer) {

@@ -1,11 +1,18 @@
 // Integration check for the image analysis pipeline, extended phase by
-// phase as lib/pipeline.ts's runImageAnalysis grows. Phase 1 only checks
-// upload infra: POST /api/analyze/image creates an Analysis row backed by
-// a Vercel Blob upload, and validation rejects bad input before doing so.
-// Requires a dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN and
-// DATABASE_URL set.
+// phase as lib/pipeline.ts's runImageAnalysis grows.
+//
+// - Region detection (Phase 2) runs in-process against a synthetic sample
+//   design (scripts/fixtures/sample-design.ts) — no dev server or database
+//   required.
+// - Upload infra (Phase 1) checks POST /api/analyze/image end to end: file
+//   validation, Vercel Blob upload, and Analysis row creation. Requires a
+//   dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN and
+//   DATABASE_URL set.
+//
 // Usage: pnpm test:image-pipeline [baseUrl]
-export {};
+import sharp from "sharp";
+import { detectRegions } from "@/lib/regions";
+import { buildSampleDesignSvg, SAMPLE_DESIGN } from "./fixtures/sample-design";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 
@@ -45,8 +52,40 @@ async function pollUntilStatusChanges(
   throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
 }
 
-async function main() {
-  console.log(`Testing against ${baseUrl}`);
+async function testRegionDetection() {
+  console.log("--- Phase 2: region detection (in-process, no server needed) ---");
+
+  const svg = buildSampleDesignSvg();
+  const png = await sharp(Buffer.from(svg)).png().toBuffer();
+
+  const result = await detectRegions(png);
+  assert(result.ok, `region detection failed: ${!result.ok ? result.errorMessage : ""}`);
+
+  const { regions } = result;
+  const textRegions = regions.filter((r) => r.type === "text");
+  const blockRegions = regions.filter((r) => r.type === "block");
+  assert(textRegions.length > 0, "expected at least one text region");
+  assert(blockRegions.length > 0, "expected at least one block region");
+  console.log(
+    `✓ detected ${regions.length} regions (${textRegions.length} text, ${blockRegions.length} block)`,
+  );
+
+  console.log("\nSample text regions:");
+  for (const r of textRegions.slice(0, 8)) {
+    console.log(`  ${JSON.stringify({ box: r.box, text: r.text, confidence: r.confidence })}`);
+  }
+
+  console.log("\nSample block regions (compare against ground truth below):");
+  for (const r of blockRegions.slice(0, 8)) {
+    console.log(`  ${JSON.stringify({ box: r.box })}`);
+  }
+  console.log("\nGround truth boxes:", JSON.stringify(SAMPLE_DESIGN.boxes));
+
+  console.log("\n✓ region detection produced a sane result — sanity-check the boxes above\n");
+}
+
+async function testUploadInfra() {
+  console.log(`--- Phase 1: upload infra (requires dev server at ${baseUrl}) ---`);
 
   // 1. Missing file should be rejected before touching the DB.
   const missingFileForm = new FormData();
@@ -101,6 +140,11 @@ async function main() {
     "expected screenshotUrl to be set to the uploaded blob URL",
   );
   console.log("✓ analysis advanced to status: extracting, screenshotUrl set:", status.screenshotUrl);
+}
+
+async function main() {
+  await testRegionDetection();
+  await testUploadInfra();
 
   console.log("\nAll checks passed.");
 }

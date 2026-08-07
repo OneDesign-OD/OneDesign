@@ -43,3 +43,6 @@ next-env.d.ts
 
 # prisma generated client
 /lib/generated/prisma
+
+# tesseract.js language model cache (auto-downloaded on first OCR run)
+*.traineddata

@@ -1,23 +1,32 @@
 // Integration check for the image analysis pipeline, extended phase by
 // phase as lib/pipeline.ts's runImageAnalysis grows.
 //
-// - Region detection (Phase 2), color extraction (Phase 3), and typography/
-//   layout measurement + rawData assembly (Phase 4) all run in-process
-//   against a synthetic sample design (scripts/fixtures/sample-design.ts) —
-//   no dev server or database required.
+// - Region detection (Phase 2), color extraction (Phase 3), typography/
+//   layout measurement + rawData assembly (Phase 4), and the font-family
+//   guess's crop-selection (Phase 5) all run in-process against a synthetic
+//   sample design (scripts/fixtures/sample-design.ts) — no dev server or
+//   database required. Phase 5's actual AI call is exercised with a
+//   deliberately fake key (same convention as test-pipeline.ts's URL-flow
+//   checks): a healthy run reaches the provider and fails with
+//   "invalid_api_key", proving crop-selection and request wiring work.
+//   Pass a real provider + key as extra args to run the full call yourself.
 // - Upload infra (Phase 1) checks POST /api/analyze/image end to end: file
 //   validation, Vercel Blob upload, and Analysis row creation. Requires a
 //   dev server running (`pnpm dev`) with BLOB_READ_WRITE_TOKEN and
 //   DATABASE_URL set.
 //
-// Usage: pnpm test:image-pipeline [baseUrl]
+// Usage: pnpm test:image-pipeline [baseUrl] [openai|anthropic|google] [realApiKey]
 import sharp from "sharp";
 import { detectRegions, type Region } from "@/lib/regions";
 import { extractColors, type RegionWithColors } from "@/lib/colors";
 import { assembleImageRawData } from "@/lib/extract";
+import { guessFontFamily } from "@/lib/fontguess";
+import type { Provider } from "@/lib/interpret";
 import { buildSampleDesignSvg, SAMPLE_DESIGN } from "./fixtures/sample-design";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
+const realProvider = process.argv[3];
+const realApiKey = process.argv[4];
 
 // The canonical 1x1 transparent PNG — enough to exercise upload/validation
 // without committing a binary fixture to the repo.
@@ -127,6 +136,32 @@ async function testRawDataAssembly(png: Buffer, regions: RegionWithColors[]) {
   console.log("\n✓ rawData assembly produced a sane result — sanity-check the values above\n");
 }
 
+async function testFontGuess(png: Buffer, regions: Region[]) {
+  console.log("--- Phase 5: font-family guess (crop selection in-process, AI call live) ---");
+
+  const fakeKeyResult = await guessFontFamily(png, regions, "anthropic", "test-key-not-a-real-secret");
+  assert(
+    !fakeKeyResult.ok && fakeKeyResult.errorCode === "invalid_api_key",
+    `expected a fake key to reach the provider and fail with "invalid_api_key", got: ${JSON.stringify(fakeKeyResult)}`,
+  );
+  console.log("✓ crop selection ran and the fake key was correctly rejected by the provider");
+
+  if (realProvider && realApiKey) {
+    const realResult = await guessFontFamily(png, regions, realProvider as Provider, realApiKey);
+    assert(
+      realResult.ok,
+      `expected the real key to succeed, got errorCode: ${!realResult.ok ? realResult.errorCode : ""}`,
+    );
+    console.log("✓ real font-family guess:", JSON.stringify(realResult.guess));
+  } else {
+    console.log(
+      "(skipping the real AI call — pass [openai|anthropic|google] [realApiKey] to run it)",
+    );
+  }
+
+  console.log();
+}
+
 async function testUploadInfra() {
   console.log(`--- Phase 1: upload infra (requires dev server at ${baseUrl}) ---`);
 
@@ -190,6 +225,7 @@ async function main() {
   const regions = await testRegionDetection(png);
   const coloredRegions = await testColorExtraction(png, regions);
   await testRawDataAssembly(png, coloredRegions);
+  await testFontGuess(png, regions);
   await testUploadInfra();
 
   console.log("\nAll checks passed.");

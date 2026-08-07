@@ -40,11 +40,21 @@ export type ExtractedElement = {
   styles: Partial<Record<StyleProp, string>>;
 };
 
+// A best-guess, not a measurement — see lib/fontguess.ts. Kept as its own
+// top-level field (rather than folded into an element's `fontFamily` style)
+// so downstream stages and the final markdown can't mistake it for a
+// pixel-measured fact the way the rest of `styles` is.
+export type FontFamilyGuess = {
+  value: string;
+  confidence: "estimated";
+};
+
 export type RawData = {
   url: string;
   extractedAt: string;
   sampleCount: number;
   elements: ExtractedElement[];
+  fontFamilyGuess?: FontFamilyGuess;
 };
 
 export type ExtractResult =

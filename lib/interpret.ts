@@ -42,7 +42,7 @@ export type InterpretResult =
 
 const MAX_PROMPT_CHARS = 40_000;
 
-function resolveModel(provider: Provider, apiKey: string) {
+export function resolveModel(provider: Provider, apiKey: string) {
   if (provider === "anthropic") {
     return createAnthropic({ apiKey })(MODEL_IDS.anthropic);
   }
@@ -111,11 +111,11 @@ export async function interpretDesign(
     // internally and wraps the exhausted attempts in a RetryError — the
     // classifiable error is on `.lastError`, not `err` itself.
     if (RetryError.isInstance(err) && APICallError.isInstance(err.lastError)) {
-      return classifyApiCallError(err.lastError);
+      return { ok: false, ...classifyApiCallError(err.lastError) };
     }
 
     if (APICallError.isInstance(err)) {
-      return classifyApiCallError(err);
+      return { ok: false, ...classifyApiCallError(err) };
     }
 
     console.error("[interpret] unclassified error:", err);
@@ -127,17 +127,21 @@ export async function interpretDesign(
   }
 }
 
-function classifyApiCallError(err: APICallError): InterpretResult {
+/**
+ * Shared AI-call error classification, also used by lib/fontguess.ts for
+ * its own (separate, narrower) vision call.
+ */
+export function classifyApiCallError(
+  err: APICallError,
+): { errorCode: InterpretationErrorCode; errorMessage: string } {
   if (err.statusCode === 401 || err.statusCode === 403) {
     return {
-      ok: false,
       errorCode: "invalid_api_key",
       errorMessage: "The provided API key was rejected by the provider.",
     };
   }
   if (err.statusCode === 429) {
     return {
-      ok: false,
       errorCode: "rate_limited",
       errorMessage: "The provider rate-limited this request.",
     };
@@ -145,7 +149,6 @@ function classifyApiCallError(err: APICallError): InterpretResult {
   if (err.statusCode === undefined) {
     console.error("[interpret] could not connect to provider:", err.message, err.cause);
     return {
-      ok: false,
       errorCode: "ai_provider_error",
       errorMessage:
         "Could not connect to the AI provider. Check your network connection and try again.",
@@ -157,7 +160,6 @@ function classifyApiCallError(err: APICallError): InterpretResult {
     err.responseBody ?? err.message,
   );
   return {
-    ok: false,
     errorCode: "ai_provider_error",
     errorMessage: `The AI provider returned an error (${err.statusCode}).`,
   };

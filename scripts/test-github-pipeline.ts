@@ -1,18 +1,20 @@
 // Integration check for the GitHub repo analysis pipeline, extended phase
 // by phase as lib/pipeline.ts's runGithubAnalysis grows.
 //
-// - Candidate-file collection (Phase 1) runs in-process against a small,
-//   stable real public repo (necolas/normalize.css — a CSS reset library,
-//   guaranteed to have real stylesheets and unlikely to ever disappear or
-//   restructure) — no dev server or database required, just a couple of
-//   real (unauthenticated) calls to the public GitHub API.
+// - Candidate-file collection (Phase 1) and stylesheet fetch/parse (Phase 2)
+//   run in-process against a small, stable real public repo
+//   (necolas/normalize.css — a CSS reset library, guaranteed to have real
+//   stylesheets and unlikely to ever disappear or restructure) — no dev
+//   server or database required, just real (unauthenticated) calls to the
+//   public GitHub API and raw.githubusercontent.com.
 // - Upload infra (Phase 1) checks POST /api/analyze/github end to end:
 //   request validation, Analysis row creation, and that the real pipeline
 //   correctly reaches "failed" with the right error code for a bad repo.
 //   Requires a dev server running (`pnpm dev`) with DATABASE_URL set.
 //
 // Usage: pnpm test:github-pipeline [baseUrl] [repoUrl]
-import { fetchCandidateFiles, parseGithubRepoUrl } from "@/lib/github";
+import { fetchCandidateFiles, parseGithubRepoUrl, type CandidateFile } from "@/lib/github";
+import { fetchAndParseCandidate, type ExtractedValues } from "@/lib/cssparse";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 const sampleRepoUrl = process.argv[3] ?? "https://github.com/necolas/normalize.css";
@@ -55,7 +57,12 @@ async function pollUntilTerminal(id: string, timeoutMs = 20_000): Promise<Status
   throw new Error(`timed out waiting for ${id} to reach a terminal status`);
 }
 
-async function testCandidateFileCollection() {
+async function testCandidateFileCollection(): Promise<{
+  owner: string;
+  repo: string;
+  branch: string;
+  files: CandidateFile[];
+}> {
   console.log(`--- Phase 1: candidate-file collection (in-process, real GitHub API) ---`);
   console.log(`Repo: ${sampleRepoUrl}`);
 
@@ -88,6 +95,52 @@ async function testCandidateFileCollection() {
     `expected a nonexistent repo to fail with "repo_not_found", got: ${JSON.stringify(badResult)}`,
   );
   console.log('✓ nonexistent repo correctly failed with "repo_not_found"');
+
+  console.log();
+  return { owner: parsed.owner, repo: parsed.repo, branch: result.branch, files: result.files };
+}
+
+async function testStylesheetParsing(
+  owner: string,
+  repo: string,
+  branch: string,
+  files: CandidateFile[],
+) {
+  console.log("--- Phase 2: fetch and parse stylesheets (in-process, real content fetch) ---");
+
+  const totals: ExtractedValues = { colors: [], fontSizes: [], fontFamilies: [], spacing: [] };
+  let filesParsed = 0;
+  let filesSkipped = 0;
+
+  for (const file of files) {
+    const extracted = await fetchAndParseCandidate(owner, repo, branch, file);
+    if (extracted === null) {
+      filesSkipped++;
+      continue;
+    }
+    filesParsed++;
+    totals.colors.push(...extracted.colors);
+    totals.fontSizes.push(...extracted.fontSizes);
+    totals.fontFamilies.push(...extracted.fontFamilies);
+    totals.spacing.push(...extracted.spacing);
+  }
+
+  assert(filesParsed > 0, "expected at least one candidate file to fetch and parse successfully");
+  console.log(`✓ parsed ${filesParsed} file(s), skipped ${filesSkipped} (fetch failure or, for a CSS-in-JS candidate, no confirmed CSS-in-JS content)`);
+
+  console.log("\nRaw extracted value counts by category:");
+  console.log({
+    colors: totals.colors.length,
+    fontSizes: totals.fontSizes.length,
+    fontFamilies: totals.fontFamilies.length,
+    spacing: totals.spacing.length,
+  });
+
+  console.log("\nSample values per category:");
+  console.log("  colors:", totals.colors.slice(0, 10));
+  console.log("  fontSizes:", totals.fontSizes.slice(0, 10));
+  console.log("  fontFamilies:", totals.fontFamilies.slice(0, 10));
+  console.log("  spacing:", totals.spacing.slice(0, 10));
 
   console.log();
 }
@@ -151,7 +204,8 @@ async function testUploadInfra() {
 }
 
 async function main() {
-  await testCandidateFileCollection();
+  const { owner, repo, branch, files } = await testCandidateFileCollection();
+  await testStylesheetParsing(owner, repo, branch, files);
   await testUploadInfra();
 
   console.log("\nAll checks passed.");

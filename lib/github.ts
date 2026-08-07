@@ -135,3 +135,30 @@ function classifyGithubError(err: unknown): {
     errorMessage: `Failed to reach GitHub: ${message}`,
   };
 }
+
+/**
+ * Fetches a single file's raw text content via the raw.githubusercontent.com
+ * CDN rather than the GitHub Contents API — it isn't subject to the REST
+ * API's 60/hour unauthenticated rate limit, which matters here since a
+ * repo's candidate list can be up to MAX_CANDIDATE_FILES fetches. Returns
+ * null on any failure (missing file, network error) — callers skip files
+ * they can't fetch rather than failing the whole analysis over one file.
+ */
+export async function fetchFileContent(
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+): Promise<string | null> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodedPath}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.text();
+  } catch (err) {
+    console.error(`[github] failed to fetch raw content for ${path}:`, err);
+    return null;
+  }
+}

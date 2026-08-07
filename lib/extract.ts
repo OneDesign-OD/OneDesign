@@ -8,6 +8,8 @@ import {
   computeLineHeights,
 } from "@/lib/typography";
 import { computeSpacing, detectLayoutGroups, type LayoutHint } from "@/lib/layout";
+import type { GithubErrorCode } from "@/lib/github";
+import type { RankedValue, RankedValues } from "@/lib/rank";
 
 export type ExtractionErrorCode = "extraction_failed";
 
@@ -38,6 +40,13 @@ export type ExtractedElement = {
   // one. Consumers (ambiguity.ts, interpret.ts) already treat missing/falsy
   // values as "no data" rather than assuming presence.
   styles: Partial<Record<StyleProp, string>>;
+  // Only present for the GitHub pipeline: how many times this exact
+  // (normalized) value appeared across the repo's stylesheets — the "measure
+  // first" signal for how likely a value is to be an intentional design
+  // token vs. a one-off. Absent for URL/image elements, which don't have a
+  // meaningful frequency (each element is one sampled DOM node/region, not
+  // an aggregated value).
+  usageCount?: number;
 };
 
 // A best-guess, not a measurement — see lib/fontguess.ts. Kept as its own
@@ -239,6 +248,60 @@ function rgbString(hex: string): string {
   const g = parseInt(value.slice(2, 4), 16);
   const b = parseInt(value.slice(4, 6), 16);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+export type AssembleGithubRawDataResult =
+  | { ok: true; data: RawData }
+  | { ok: false; errorCode: GithubErrorCode; errorMessage: string };
+
+/**
+ * Turns Phase 3's frequency-ranked values into the same `RawData` shape the
+ * other two pipelines produce — each ranked value becomes one element, with
+ * `usageCount` carrying the frequency signal ambiguity-detection and AI
+ * interpretation can reason about. Pure assembly — no AI calls.
+ */
+export function assembleGithubRawData(
+  repoUrl: string,
+  ranked: RankedValues,
+): AssembleGithubRawDataResult {
+  const elements: ExtractedElement[] = [
+    ...ranked.colors.map((r) => rankedValueToElement("color", "color", r)),
+    ...ranked.fontSizes.map((r) => rankedValueToElement("font-size", "fontSize", r)),
+    ...ranked.fontFamilies.map((r) => rankedValueToElement("font-family", "fontFamily", r)),
+    ...ranked.spacing.map((r) => rankedValueToElement("spacing", "gap", r)),
+  ];
+
+  if (elements.length === 0) {
+    return {
+      ok: false,
+      errorCode: "no_styles_found",
+      errorMessage:
+        "No usable color, font-size, font-family, or spacing values were found across the repo's stylesheets.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      url: repoUrl,
+      extractedAt: new Date().toISOString(),
+      sampleCount: elements.length,
+      elements,
+    },
+  };
+}
+
+function rankedValueToElement(
+  category: string,
+  styleProp: StyleProp,
+  ranked: RankedValue,
+): ExtractedElement {
+  return {
+    label: `${category} ${ranked.value}`,
+    tag: category,
+    styles: { [styleProp]: ranked.value },
+    usageCount: ranked.usageCount,
+  };
 }
 
 /**

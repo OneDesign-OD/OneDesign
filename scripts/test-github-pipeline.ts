@@ -1,12 +1,13 @@
 // Integration check for the GitHub repo analysis pipeline, extended phase
 // by phase as lib/pipeline.ts's runGithubAnalysis grows.
 //
-// - Candidate-file collection (Phase 1) and stylesheet fetch/parse (Phase 2)
-//   run in-process against a small, stable real public repo
-//   (necolas/normalize.css — a CSS reset library, guaranteed to have real
-//   stylesheets and unlikely to ever disappear or restructure) — no dev
-//   server or database required, just real (unauthenticated) calls to the
-//   public GitHub API and raw.githubusercontent.com.
+// - Candidate-file collection (Phase 1), stylesheet fetch/parse (Phase 2),
+//   and tally/rank/rawData assembly (Phase 3) all run in-process against a
+//   small, stable real public repo (necolas/normalize.css — a CSS reset
+//   library, guaranteed to have real stylesheets and unlikely to ever
+//   disappear or restructure) — no dev server or database required, just
+//   real (unauthenticated) calls to the public GitHub API and
+//   raw.githubusercontent.com.
 // - Upload infra (Phase 1) checks POST /api/analyze/github end to end:
 //   request validation, Analysis row creation, and that the real pipeline
 //   correctly reaches "failed" with the right error code for a bad repo.
@@ -15,6 +16,8 @@
 // Usage: pnpm test:github-pipeline [baseUrl] [repoUrl]
 import { fetchCandidateFiles, parseGithubRepoUrl, type CandidateFile } from "@/lib/github";
 import { fetchAndParseCandidate, type ExtractedValues } from "@/lib/cssparse";
+import { rankExtractedValues } from "@/lib/rank";
+import { assembleGithubRawData } from "@/lib/extract";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 const sampleRepoUrl = process.argv[3] ?? "https://github.com/necolas/normalize.css";
@@ -105,7 +108,7 @@ async function testStylesheetParsing(
   repo: string,
   branch: string,
   files: CandidateFile[],
-) {
+): Promise<ExtractedValues> {
   console.log("--- Phase 2: fetch and parse stylesheets (in-process, real content fetch) ---");
 
   const totals: ExtractedValues = { colors: [], fontSizes: [], fontFamilies: [], spacing: [] };
@@ -141,6 +144,32 @@ async function testStylesheetParsing(
   console.log("  fontSizes:", totals.fontSizes.slice(0, 10));
   console.log("  fontFamilies:", totals.fontFamilies.slice(0, 10));
   console.log("  spacing:", totals.spacing.slice(0, 10));
+
+  console.log();
+  return totals;
+}
+
+async function testRankingAndAssembly(repoUrl: string, totals: ExtractedValues) {
+  console.log("--- Phase 3: tally, rank, and assemble rawData (in-process) ---");
+
+  const ranked = rankExtractedValues(totals);
+  console.log("Ranked counts by category:", {
+    colors: ranked.colors.length,
+    fontSizes: ranked.fontSizes.length,
+    fontFamilies: ranked.fontFamilies.length,
+    spacing: ranked.spacing.length,
+  });
+
+  const result = assembleGithubRawData(repoUrl, ranked);
+  assert(result.ok, `rawData assembly failed: ${!result.ok ? result.errorMessage : ""}`);
+  assert(
+    result.data.elements.every((el) => typeof el.usageCount === "number"),
+    "expected every element to have a usageCount",
+  );
+  console.log(`✓ assembled rawData with ${result.data.elements.length} elements, all with usageCount`);
+
+  console.log("\nFull assembled rawData:");
+  console.log(JSON.stringify(result.data, null, 2));
 
   console.log();
 }
@@ -205,7 +234,8 @@ async function testUploadInfra() {
 
 async function main() {
   const { owner, repo, branch, files } = await testCandidateFileCollection();
-  await testStylesheetParsing(owner, repo, branch, files);
+  const totals = await testStylesheetParsing(owner, repo, branch, files);
+  await testRankingAndAssembly(sampleRepoUrl, totals);
   await testUploadInfra();
 
   console.log("\nAll checks passed.");

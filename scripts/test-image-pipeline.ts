@@ -2,7 +2,8 @@
 // phase as lib/pipeline.ts's runImageAnalysis grows.
 //
 // - Region detection (Phase 2), color extraction (Phase 3), typography/
-//   layout measurement + rawData assembly (Phase 4), and the font-family
+//   layout measurement + rawData assembly (Phase 4), ambiguity detection
+//   (Phase 6, reusing lib/ambiguity.ts unmodified), and the font-family
 //   guess's crop-selection (Phase 5) all run in-process against a synthetic
 //   sample design (scripts/fixtures/sample-design.ts) — no dev server or
 //   database required. Phase 5's actual AI call is exercised with a
@@ -19,8 +20,9 @@
 import sharp from "sharp";
 import { detectRegions, type Region } from "@/lib/regions";
 import { extractColors, type RegionWithColors } from "@/lib/colors";
-import { assembleImageRawData } from "@/lib/extract";
+import { assembleImageRawData, type RawData } from "@/lib/extract";
 import { guessFontFamily } from "@/lib/fontguess";
+import { detectAmbiguities } from "@/lib/ambiguity";
 import type { Provider } from "@/lib/interpret";
 import { buildSampleDesignSvg, SAMPLE_DESIGN } from "./fixtures/sample-design";
 
@@ -121,7 +123,10 @@ async function testColorExtraction(png: Buffer, regions: Region[]): Promise<Regi
   return result.regions;
 }
 
-async function testRawDataAssembly(png: Buffer, regions: RegionWithColors[]) {
+async function testRawDataAssembly(
+  png: Buffer,
+  regions: RegionWithColors[],
+): Promise<RawData> {
   console.log("--- Phase 4: typography/layout measurement + rawData assembly (in-process) ---");
 
   const result = await assembleImageRawData("test://sample-design", png, regions);
@@ -134,6 +139,23 @@ async function testRawDataAssembly(png: Buffer, regions: RegionWithColors[]) {
   console.log(JSON.stringify(result.data, null, 2));
 
   console.log("\n✓ rawData assembly produced a sane result — sanity-check the values above\n");
+  return result.data;
+}
+
+async function testAmbiguityDetection(rawData: RawData) {
+  console.log("--- Phase 6: ambiguity detection (reusing the URL flow's logic, unmodified) ---");
+
+  const report = detectAmbiguities(rawData);
+  console.log(`✓ detectAmbiguities ran without error (${report.flags.length} flags)`);
+
+  const counts: Record<string, number> = {};
+  for (const flag of report.flags) counts[flag.type] = (counts[flag.type] ?? 0) + 1;
+  console.log("counts by type:", counts);
+
+  console.log("\nFlags (expect some natural noise from pixel-derived data):");
+  console.log(JSON.stringify(report.flags, null, 2));
+
+  console.log("\n✓ ambiguity detection produced a sane result — sanity-check the flags above\n");
 }
 
 async function testFontGuess(png: Buffer, regions: Region[]) {
@@ -224,7 +246,8 @@ async function main() {
   const png = await renderSampleImage();
   const regions = await testRegionDetection(png);
   const coloredRegions = await testColorExtraction(png, regions);
-  await testRawDataAssembly(png, coloredRegions);
+  const rawData = await testRawDataAssembly(png, coloredRegions);
+  await testAmbiguityDetection(rawData);
   await testFontGuess(png, regions);
   await testUploadInfra();
 

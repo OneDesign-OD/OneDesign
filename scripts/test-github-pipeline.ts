@@ -1,0 +1,163 @@
+// Integration check for the GitHub repo analysis pipeline, extended phase
+// by phase as lib/pipeline.ts's runGithubAnalysis grows.
+//
+// - Candidate-file collection (Phase 1) runs in-process against a small,
+//   stable real public repo (necolas/normalize.css — a CSS reset library,
+//   guaranteed to have real stylesheets and unlikely to ever disappear or
+//   restructure) — no dev server or database required, just a couple of
+//   real (unauthenticated) calls to the public GitHub API.
+// - Upload infra (Phase 1) checks POST /api/analyze/github end to end:
+//   request validation, Analysis row creation, and that the real pipeline
+//   correctly reaches "failed" with the right error code for a bad repo.
+//   Requires a dev server running (`pnpm dev`) with DATABASE_URL set.
+//
+// Usage: pnpm test:github-pipeline [baseUrl] [repoUrl]
+import { fetchCandidateFiles, parseGithubRepoUrl } from "@/lib/github";
+
+const baseUrl = process.argv[2] ?? "http://localhost:3000";
+const sampleRepoUrl = process.argv[3] ?? "https://github.com/necolas/normalize.css";
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`Assertion failed: ${message}`);
+}
+
+type StatusResponse = {
+  status: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  markdown: string | null;
+};
+
+async function pollUntilStatusChanges(
+  id: string,
+  from: string,
+  timeoutMs = 20_000,
+): Promise<StatusResponse> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
+    const status = (await res.json()) as StatusResponse;
+    if (status.status !== from) return status;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`timed out waiting for ${id} to leave status "${from}"`);
+}
+
+async function pollUntilTerminal(id: string, timeoutMs = 20_000): Promise<StatusResponse> {
+  const terminal = new Set(["complete", "failed"]);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${baseUrl}/api/analysis/${id}/status`);
+    const status = (await res.json()) as StatusResponse;
+    if (terminal.has(status.status)) return status;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`timed out waiting for ${id} to reach a terminal status`);
+}
+
+async function testCandidateFileCollection() {
+  console.log(`--- Phase 1: candidate-file collection (in-process, real GitHub API) ---`);
+  console.log(`Repo: ${sampleRepoUrl}`);
+
+  const parsed = parseGithubRepoUrl(sampleRepoUrl);
+  assert(parsed !== null, `failed to parse repo URL: ${sampleRepoUrl}`);
+  console.log(`✓ parsed owner/repo: ${parsed.owner}/${parsed.repo}`);
+
+  const result = await fetchCandidateFiles(parsed.owner, parsed.repo);
+  assert(result.ok, `candidate file collection failed: ${!result.ok ? result.errorMessage : ""}`);
+
+  assert(result.files.length > 0, "expected at least one candidate file");
+  const stylesheets = result.files.filter((f) => f.kind === "stylesheet");
+  assert(stylesheets.length > 0, "expected at least one real stylesheet file");
+  console.log(
+    `✓ found ${result.files.length} candidate files on branch "${result.branch}" (${stylesheets.length} stylesheets, ${result.files.length - stylesheets.length} CSS-in-JS candidates)`,
+  );
+
+  console.log("\nSample files:");
+  for (const f of result.files.slice(0, 15)) {
+    console.log(`  ${f.kind}: ${f.path}`);
+  }
+
+  // Bad repo: parses fine as a URL shape, but doesn't exist.
+  const badResult = await fetchCandidateFiles(
+    "this-org-should-not-exist-onedesign-test",
+    "nope",
+  );
+  assert(
+    !badResult.ok && badResult.errorCode === "repo_not_found",
+    `expected a nonexistent repo to fail with "repo_not_found", got: ${JSON.stringify(badResult)}`,
+  );
+  console.log('✓ nonexistent repo correctly failed with "repo_not_found"');
+
+  console.log();
+}
+
+async function testUploadInfra() {
+  console.log(`--- Phase 1: upload infra (requires dev server at ${baseUrl}) ---`);
+
+  // 1. Invalid repoUrl shape should be rejected before touching the DB.
+  const invalidRes = await fetch(`${baseUrl}/api/analyze/github`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repoUrl: "not-a-github-url",
+      provider: "anthropic",
+      apiKey: "test-key-not-a-real-secret",
+    }),
+  });
+  assert(invalidRes.status === 400, `expected 400 for invalid repoUrl, got ${invalidRes.status}`);
+  console.log("✓ invalid repoUrl rejected with 400");
+
+  // 2. Valid request creates a row and kicks off the pipeline.
+  const createRes = await fetch(`${baseUrl}/api/analyze/github`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repoUrl: sampleRepoUrl,
+      provider: "anthropic",
+      apiKey: "test-key-not-a-real-secret",
+    }),
+  });
+  assert(createRes.status === 200, `expected 200 from create, got ${createRes.status}`);
+  const created = (await createRes.json()) as { id?: string };
+  assert(typeof created.id === "string" && created.id.length > 0, "response missing id");
+  console.log("✓ created analysis:", created.id);
+
+  const status = await pollUntilStatusChanges(created.id, "pending");
+  assert(
+    status.status === "extracting",
+    `expected status to advance to "extracting" (candidate collection succeeded, nothing further wired up yet), got ${status.status}`,
+  );
+  console.log("✓ analysis advanced to status: extracting");
+
+  // 3. A repo that doesn't exist should reach "failed" with the right code.
+  const badCreateRes = await fetch(`${baseUrl}/api/analyze/github`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repoUrl: "https://github.com/this-org-should-not-exist-onedesign-test/nope",
+      provider: "anthropic",
+      apiKey: "test-key-not-a-real-secret",
+    }),
+  });
+  assert(badCreateRes.status === 200, `expected 200 from create, got ${badCreateRes.status}`);
+  const badCreated = (await badCreateRes.json()) as { id: string };
+  const badStatus = await pollUntilTerminal(badCreated.id);
+  assert(
+    badStatus.status === "failed" && badStatus.errorCode === "repo_not_found",
+    `expected a nonexistent repo to fail with "repo_not_found", got: ${JSON.stringify(badStatus)}`,
+  );
+  console.log('✓ nonexistent repo correctly failed with "repo_not_found" through the full pipeline');
+}
+
+async function main() {
+  await testCandidateFileCollection();
+  await testUploadInfra();
+
+  console.log("\nAll checks passed.");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});

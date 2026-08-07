@@ -13,6 +13,7 @@
     "test:api": "tsx scripts/test-api.ts",
     "test:pipeline": "tsx scripts/test-pipeline.ts",
     "test:image-pipeline": "tsx scripts/test-image-pipeline.ts",
+    "test:github-pipeline": "tsx scripts/test-github-pipeline.ts",
     "test:extract": "tsx scripts/test-extract.ts",
     "test:ambiguity": "tsx scripts/test-ambiguity.ts",
     "test:interpret": "tsx scripts/test-interpret.ts"
@@ -22,6 +23,8 @@
     "@ai-sdk/google": "^4.0.34",
     "@ai-sdk/openai": "^4.0.27",
     "@base-ui/react": "^1.6.0",
+    "@octokit/request-error": "^7.1.1",
+    "@octokit/rest": "^22.0.1",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@react-three/drei": "^10.7.7",

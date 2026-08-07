@@ -6,6 +6,7 @@ import { generateMarkdown } from "@/lib/markdown";
 import { detectRegions } from "@/lib/regions";
 import { extractColors } from "@/lib/colors";
 import { guessFontFamily } from "@/lib/fontguess";
+import { parseGithubRepoUrl, fetchCandidateFiles } from "@/lib/github";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -303,6 +304,71 @@ export async function runImageAnalysis(
           status: "failed",
           errorCode: "unknown_load_error",
           errorMessage: "Something went wrong while analyzing this image.",
+        },
+      })
+      .catch(() => {});
+  }
+}
+
+/**
+ * Runs the GitHub repo analysis pipeline for an already-created Analysis
+ * row. Intended to be invoked via `after()`, same as the other two flows.
+ *
+ * Currently only proves candidate-file collection works end to end (repo
+ * lookup + tree fetch + filtering, correctly propagating repo_not_found /
+ * github_rate_limited / no_styles_found to status "failed") — fetching and
+ * parsing stylesheet content, ranking values, and AI interpretation are
+ * wired in as later phases build them, at which point this reaches
+ * "complete"/"failed" like the other two pipelines do.
+ */
+export async function runGithubAnalysis(
+  analysisId: string,
+  repoUrl: string,
+  _provider: Provider,
+  _apiKey: string,
+) {
+  try {
+    await prisma.analysis.update({
+      where: { id: analysisId },
+      data: { status: "extracting" },
+    });
+
+    const parsed = parseGithubRepoUrl(repoUrl);
+    if (!parsed) {
+      // The route already validates this shape — this is just a defensive
+      // guard, not an expected path.
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: "repo_not_found",
+          errorMessage: "Could not parse the repository URL.",
+        },
+      });
+      return;
+    }
+
+    const candidates = await fetchCandidateFiles(parsed.owner, parsed.repo);
+    if (!candidates.ok) {
+      await prisma.analysis.update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: candidates.errorCode,
+          errorMessage: candidates.errorMessage,
+        },
+      });
+      return;
+    }
+  } catch (err) {
+    console.error(`[pipeline] unexpected failure for ${analysisId}:`, err);
+    await prisma.analysis
+      .update({
+        where: { id: analysisId },
+        data: {
+          status: "failed",
+          errorCode: "github_api_error",
+          errorMessage: "Something went wrong while analyzing this repository.",
         },
       })
       .catch(() => {});
